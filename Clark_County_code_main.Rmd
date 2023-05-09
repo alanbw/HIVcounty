@@ -9,7 +9,10 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-directory_loc = "C:/Users/ravij/Dropbox/Academic/Research/Projects/HIVcounty/"
+directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/"
+county_demo_file_subloc = "Clark_County_data/clark_county_demographics.csv"
+county_zip_file_subloc = "Clark_County_data/clark_county_by_zip.csv"
+
 ```
 
 
@@ -19,7 +22,11 @@ library('readxl')
 library('kableExtra')
 library('eeptools')
 library('geepack')
-library(caret)
+library('caret')
+library('tidycensus')
+library('zipcodeR')
+
+source("/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/HIVcounty/HIVcounty_func.R")
 ```
 
 ## Research question
@@ -32,26 +39,15 @@ We create an analytic dataset that includes individual and zip code level covari
 
 ```{r dataset, echo=FALSE, message=FALSE, warning = FALSE}
 
-county_demo.df = read_csv(paste(directory_loc, "Clark_County_data/clark_county_demographics.csv", sep="")) %>% 
-  mutate(across(where(is.character), toupper))
+county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
 
-county_zip.df = read_csv(paste(directory_loc, "Clark_County_data/clark_county_by_zip.csv", sep="")) %>% 
-  mutate(across(where(is.character), toupper))
+county_diagnosis.df  = read_county_data(directory_loc = directory_loc,
+                             county_demo_file_subloc = county_demo_file_subloc,
+                             county_zip_file_subloc = county_zip_file_subloc,
+                             county_zip_list = county_zip_list
+                             ) 
 
-county_diagnosis.df = left_join(county_demo.df, county_zip.df,
-                      by = c( "rsd_zip_cd" = "zipcode"))
-
-#Filter no diagnosed in Clark County
-
-county_zip.vec = county_zip.df$zipcode
-
-county_diagnosis.df  = county_diagnosis.df %>% 
-  filter(rsd_zip_cd %in% county_zip.vec)
-
-        
 ```     
-
-Number of individuals in County file: `r county_demo.df %>% nrow()`
 
 Number of individuals after filtering to diagnosed in county: `r county_diagnosis.df %>% nrow()`
 
@@ -96,6 +92,35 @@ county_diagnosis.df %>%
   
 
 ```
+
+### Geographic map
+
+```{r desc_map, echo=FALSE, message=FALSE, warning = FALSE}
+
+zcta_data <- get_acs(
+  geography = "zcta",
+  variables = "B19013_001",
+  zcta = county_zip_list, 
+  geometry = TRUE
+)
+
+county_summary.df = county_diagnosis.df %>%
+  group_by(rsd_zip_cd) %>%
+  summarize(n_tot = n(),
+            n_outcome = sum(outcome)) %>%
+  ungroup() %>%
+  mutate(per_outcome = n_outcome/n_tot) %>%
+  mutate(rsd_zip_cd_cat = as.character(rsd_zip_cd))
+  
+
+zcta_level.df = left_join(zcta_data,
+                          county_summary.df,
+                          by = c("GEOID" = "rsd_zip_cd_cat"))
+
+ggplot(zcta_level.df, aes(fill = per_outcome, color = per_outcome)) +
+  geom_sf() 
+```
+
 ## Individual-level analyses
 
 ### Regression
