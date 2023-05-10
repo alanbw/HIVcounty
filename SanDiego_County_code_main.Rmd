@@ -1,0 +1,59 @@
+---
+title: "SanDiego_County_main"
+output: html_document
+date: "2023-05-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/"
+county_demo_file_subloc = "San_Diego_data/sd_county_demographics.csv"
+county_zip_file_subloc = "San_Diego_data/sd_county_by_zip.csv"
+
+```
+
+
+```{r library, echo=FALSE, message=FALSE, warning = FALSE}
+library('tidyverse')
+library('readxl')
+library('kableExtra')
+library('eeptools')
+library('geepack')
+library('caret')
+library('tidycensus')
+library('zipcodeR')
+
+source("/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/HIVcounty/HIVcounty_func.R")
+```
+
+## Research question
+
+Research Question 3: Identify predictors (including viral clustering) that are associated with high rates of stage 3-4 new diagnoses. 
+
+## Create analytic dataset
+
+We create an analytic dataset that includes individual and zip code level covariates. 
+
+```{r dataset, echo=FALSE, message=FALSE, warning = FALSE}
+
+county_zip_list = search_county("San Diego", "CA") %>% pull(zipcode)
+
+county_diagnosis.df  = read_county_data(directory_loc = directory_loc,
+                             county_demo_file_subloc = county_demo_file_subloc,
+                             county_zip_file_subloc = county_zip_file_subloc,
+                             county_zip_list = county_zip_list
+                             ) 
+
+```     
+
+Number of individuals after filtering to diagnosed in county: `r county_diagnosis.df %>% nrow()`
+
+## Outcome generation
+
+We create a binary variable indicating if an individual was sequenced within 30-days of diagnosis.
+
+```{r outcomes, echo=FALSE, message=FALSE, warning = FALSE}
+
+```
+

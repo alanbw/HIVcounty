@@ -25,6 +25,9 @@ library('geepack')
 library('caret')
 library('tidycensus')
 library('zipcodeR')
+library('leaflet')
+library('classInt')
+library('RColorBrewer')
 
 source("/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/HIVcounty/HIVcounty_func.R")
 ```
@@ -116,8 +119,98 @@ zcta_level.df = left_join(zcta_data,
                           county_summary.df,
                           by = c("GEOID" = "rsd_zip_cd_cat"))
 
-ggplot(zcta_level.df, aes(fill = per_outcome, color = per_outcome)) +
-  geom_sf() 
+zcta_level.df = left_join(zcta_level.df,
+                          zip_code_db %>% select(zipcode, lat, lng),
+                          by = c("GEOID" = "zipcode")) %>%
+  filter(!is.na(lat))
+
+pal_fun <- colorQuantile("YlOrRd", NULL, n = 5)
+
+p_popup <- paste0("<strong>Proportion Late Diagnosis: </strong>", zcta_level.df$per_outcome)
+breaks_qt <- classIntervals(zcta_level.df$per_outcome, n = 7, style = "quantile")
+
+leaflet(zcta_level.df) %>%
+  addPolygons(
+    stroke = FALSE, 
+    fillColor = ~pal_fun(per_outcome),
+    fillOpacity = 0.8, smoothFactor = 0.5,
+    popup = p_popup) %>%
+  addTiles()  %>%
+  addLegend("bottomright", 
+            colors = brewer.pal(7, "YlOrRd"), 
+            labels = paste0("up to ", format(breaks_qt$brks[-1], digits = 2)),
+            title =  'Proportion of Late Diagnoses') %>%
+  addCircleMarkers(zcta_level.df$lng, zcta_level.df$lat, radius=zcta_level.df$n_tot/50, 
+                   color = "blue", 
+                   stroke = FALSE, fillOpacity = 0.5) 
+
+```
+### Geographic map
+
+```{r desc_demo, echo=FALSE, message=FALSE, warning = FALSE}
+
+race_prop.df = county_diagnosis.df %>%
+  group_by(Race.full.factor) %>%
+  summarize(total_n = n(),
+            late_diag_n = sum(outcome)) %>%
+  ungroup() %>%
+  mutate(prop = late_diag_n/total_n)
+
+p_race <-ggplot(race_prop.df, aes(x=Race.full.factor, y=prop, fill=Race.full.factor)) +
+  geom_bar(stat="identity")+theme_minimal() +
+  geom_text(aes(label=total_n), vjust=-1) +
+  labs(title="",
+       x="Race / Ethnicity", y = "Proportion Late Diagnosis") +
+  ylim(0,1) +
+  theme(axis.title.x = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 16)) +
+  guides(fill=guide_legend(title="Race / Ethnicity"))+
+  scale_fill_brewer(palette="Spectral")
+p_race
+
+exp_cat_prop.df = county_diagnosis.df %>%
+  group_by(`Exposure Category.factor`) %>%
+  summarize(total_n = n(),
+            late_diag_n = sum(outcome)) %>%
+  ungroup() %>%
+  mutate(prop = late_diag_n/total_n)
+
+p_exp_cat <-ggplot(exp_cat_prop.df, aes(x=`Exposure Category.factor`, y=prop, fill=`Exposure Category.factor`)) +
+  geom_bar(stat="identity")+theme_minimal() +
+  geom_text(aes(label=total_n), vjust=-1) +
+  labs(title="",
+       x="Exposure Category", y = "Proportion Late Diagnosis") +
+  ylim(0,1) +
+  theme(axis.title.x = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 16)) +
+  guides(fill=guide_legend(title="Exposure Risk")) +
+  scale_fill_brewer(palette="Spectral")
+p_exp_cat
+
+
+edu_cat_prop.df = county_diagnosis.df %>%
+  group_by(Education.factor) %>%
+  summarize(total_n = n(),
+            late_diag_n = sum(outcome)) %>%
+  ungroup() %>%
+  mutate(prop = late_diag_n/total_n)
+
+p_edu_cat <-ggplot(edu_cat_prop.df, aes(x=Education.factor, y=prop, fill=Education.factor)) +
+  geom_bar(stat="identity")+theme_minimal() +
+  geom_text(aes(label=total_n), vjust=-1) +
+  labs(title="",
+       x="Education Category", y = "Proportion Late Diagnosis") +
+  ylim(0,1) +
+  theme(axis.title.x = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 16)) +
+  guides(fill=guide_legend(title="Education")) +
+  scale_fill_brewer(palette="Spectral")
+p_edu_cat
+
+
 ```
 
 ## Individual-level analyses
@@ -191,6 +284,38 @@ county_diagnosis.df = county_diagnosis.df %>%
 ```
 
 ```{r exploratory_analysis, echo=FALSE, message=FALSE, warning = FALSE}
+
+p_predictor_diagnosis_year <- ggplot(county_diagnosis.df, aes(x=predictor_diagnosis_year, y=outcome)) +
+  geom_point(col = "blue") +
+  geom_smooth(col = "red") +
+  labs(title="Late Diagnosis by Diagnosis Year",
+        x ="Diagnosis Year", y = "Late Diagnosis")
+
+p_predictor_diagnosis_year
+
+p_Age.diagnosis <- ggplot(county_diagnosis.df, aes(x=Age.diagnosis, y=outcome)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title="Late Diagnosis by Age at Diagnosis",
+        x ="Age at Diagnosis", y = "Late Diagnosis")
+
+p_Age.diagnosis
+
+p_zip_income <- ggplot(county_diagnosis.df, aes(x=Median_Income_Total, y=outcome)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title="Late Diagnosis by Zip Code Level Income",
+        x ="Zip Code Level Income", y = "Late Diagnosis")
+
+p_zip_income
+
+p_percent_clustered_2022 <- ggplot(county_diagnosis.df, aes(x=percent_clustered_2022, y=outcome)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title="Late Diagnosis by Zip Code Clustering",
+        x ="Zip Code Level Clustering", y = "Late Diagnosis")
+
+p_percent_clustered_2022
 
 ```
 
@@ -305,11 +430,11 @@ rf_test <- predict(rf_model, newdata = testing)
 confusionMatrix(rf_test, as.factor(testing$outcome))
 ```
 
-## County-level predictors
+## Zip Code-level predictors
 
 ### Regression
 
-county-level variables to consider: 
+zip code-level variables to consider: 
 
 * Median income
 * Percent in poverty
