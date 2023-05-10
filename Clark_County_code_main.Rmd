@@ -190,6 +190,10 @@ county_diagnosis.df = county_diagnosis.df %>%
 
 ```
 
+```{r exploratory_analysis, echo=FALSE, message=FALSE, warning = FALSE}
+
+```
+
 ```{r Univariate_reg, echo=FALSE, message=FALSE, warning = FALSE}
 
 uni_reg_res.df = tibble(
