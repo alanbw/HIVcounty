@@ -90,7 +90,6 @@ county_diagnosis.df %>%
   kbl() %>%
   kable_paper("hover", full_width = F)
   
-
 ```
 
 ### Geographic map
