@@ -12,7 +12,11 @@ knitr::opts_chunk$set(echo = TRUE)
 directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/"
 county_demo_file_subloc = "Clark_County_data/clark_county_demographics.csv"
 county_zip_file_subloc = "Clark_County_data/clark_county_by_zip.csv"
+county_vl_file_subloc = "Clark_County_data/clark_viral_suppression_by_year.csv"
 
+outcome_var = "HIVstage"
+outcome_var = "VLsupp"
+title_a = "Proportion VL Suppression"
 ```
 
 
@@ -47,7 +51,8 @@ county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
 county_diagnosis.df  = read_county_data(directory_loc = directory_loc,
                              county_demo_file_subloc = county_demo_file_subloc,
                              county_zip_file_subloc = county_zip_file_subloc,
-                             county_zip_list = county_zip_list
+                             county_zip_list = county_zip_list,
+                             county_vl_file_subloc = county_vl_file_subloc
                              ) 
 
 ```     
@@ -68,16 +73,32 @@ VS
 
 ```{r outcomes, echo=FALSE, message=FALSE, warning = FALSE}
 
-county_diagnosis.df = county_diagnosis.df %>%
-  mutate(outcome_disease_categ_dx_bin = case_when(
-    `Disease Category` == "HIV ONLY (HIV, STAGE 1 OR 2)" ~ 0,
-    `Disease Category` == "HIV AND AIDS SIMULTANEOUSLY (HIV, STAGE 3)" ~ 1,
-    `Disease Category` == "HIV AND LATER AIDS (HIV, STAGE 3)" ~ 1,
-    TRUE ~ NA_real_))
 
-county_diagnosis.df = county_diagnosis.df %>%
-  mutate(outcome = outcome_disease_categ_dx_bin) %>%
-  filter(!is.na(outcome))
+if (outcome_var == "HIVstage") {
+  county_diagnosis.df = county_diagnosis.df %>%
+    mutate(outcome_disease_categ_dx_bin = case_when(
+      `Disease Category` == "HIV ONLY (HIV, STAGE 1 OR 2)" ~ 0,
+      `Disease Category` == "HIV AND AIDS SIMULTANEOUSLY (HIV, STAGE 3)" ~ 1,
+      `Disease Category` == "HIV AND LATER AIDS (HIV, STAGE 3)" ~ 1,
+      TRUE ~ NA_real_))
+  
+  county_diagnosis.df = county_diagnosis.df %>%
+    mutate(outcome = outcome_disease_categ_dx_bin) %>%
+    filter(!is.na(outcome))
+}
+
+if (outcome_var == "VLsupp") {
+    county_diagnosis.df = county_diagnosis.df %>%
+      mutate(outcome = `2022`) %>% 
+      filter(`Diagnosis year` <= 2022) %>%
+      filter(is.na(death_year) | death_year > 2022) %>%
+      mutate(outcome = case_when(
+    outcome == 0 ~ 0,
+    outcome == 1 ~ 1,
+    TRUE ~ 0))
+}
+
+
 
 ```
 
@@ -124,10 +145,10 @@ zcta_level.df = left_join(zcta_level.df,
                           by = c("GEOID" = "zipcode")) %>%
   filter(!is.na(lat))
 
-pal_fun <- colorQuantile("YlOrRd", NULL, n = 5)
-
+break_num = 3
+pal_fun <- colorQuantile("YlOrRd", NULL, n = break_num)
 p_popup <- paste0("<strong>Proportion Late Diagnosis: </strong>", zcta_level.df$per_outcome)
-breaks_qt <- classIntervals(zcta_level.df$per_outcome, n = 7, style = "quantile")
+breaks_qt <- classIntervals(zcta_level.df$per_outcome, n = break_num, style = "quantile")
 
 leaflet(zcta_level.df) %>%
   addPolygons(
@@ -137,7 +158,7 @@ leaflet(zcta_level.df) %>%
     popup = p_popup) %>%
   addTiles()  %>%
   addLegend("bottomright", 
-            colors = brewer.pal(7, "YlOrRd"), 
+            colors = brewer.pal(break_num, "YlOrRd"), 
             labels = paste0("up to ", format(breaks_qt$brks[-1], digits = 2)),
             title =  'Proportion of Late Diagnoses') %>%
   addCircleMarkers(zcta_level.df$lng, zcta_level.df$lat, radius=zcta_level.df$n_tot/50, 
@@ -316,6 +337,10 @@ p_percent_clustered_2022 <- ggplot(county_diagnosis.df, aes(x=percent_clustered_
         x ="Zip Code Level Clustering", y = "Late Diagnosis")
 
 p_percent_clustered_2022
+
+county_diagnosis.df %>%
+  group_by(clustered_2022, outcome) %>%
+  summarize(n=n()) 
 
 ```
 
