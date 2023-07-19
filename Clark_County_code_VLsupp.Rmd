@@ -1,0 +1,590 @@
+---
+title: "Clark_County_VLsupp.R"
+author: "ravi"
+date: "4/30/2023"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/"
+county_demo_file_subloc = "Clark_County_data/clark_county_demographics.csv"
+county_zip_file_subloc = "Clark_County_data/clark_county_by_zip.csv"
+county_vl_file_subloc = "Clark_County_data/clark_viral_suppression_by_year.csv"
+
+#county_demo_file_subloc = "San_Diego_data/sd_county_demographics.csv"
+#county_zip_file_subloc = "San_Diego_data/sd_county_by_zip.csv"
+#county_vl_file_subloc = "San_Diego_data/sd_viral_suppression_by_year.csv"
+
+outcome_var = "HIVstage"
+outcome_var = "VLsupp"
+title_a = "Proportion VL Suppression"
+```
+
+
+```{r library, echo=FALSE, message=FALSE, warning = FALSE}
+library('tidyverse')
+library('readxl')
+library('kableExtra')
+library('eeptools')
+library('geepack')
+library('caret')
+library('tidycensus')
+library('zipcodeR')
+library('leaflet')
+library('classInt')
+library('RColorBrewer')
+
+source("/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/HIVcounty/HIVcounty_func.R")
+```
+
+## Research question
+
+Research Question 3: Identify predictors (including viral clustering) that are associated with high rates of viral load suppression. 
+
+## Create analytic dataset
+
+We create an analytic dataset that includes individual and zip code level covariates. 
+
+```{r dataset, echo=FALSE, message=FALSE, warning = FALSE}
+
+county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
+county_zip_list = search_county("San Diego", "CA") %>% pull(zipcode)
+
+county_diagnosis.df  = read_county_data(directory_loc = directory_loc,
+                             county_demo_file_subloc = county_demo_file_subloc,
+                             county_zip_file_subloc = county_zip_file_subloc,
+                             county_zip_list = county_zip_list,
+                             county_vl_file_subloc = county_vl_file_subloc
+                             ) 
+
+```     
+
+Number of individuals after filtering to diagnosed in county: `r county_diagnosis.df %>% nrow()`
+
+## Outcome generation
+
+We dichotomize the HIV stage of an individual.
+
+* VL > 200
+
+VS
+
+* VL <= 200
+
+```{r outcomes, echo=FALSE, message=FALSE, warning = FALSE}
+
+
+if (outcome_var == "HIVstage") {
+  county_diagnosis.df = county_diagnosis.df %>%
+    mutate(outcome_disease_categ_dx_bin = case_when(
+      `Disease Category` == "HIV ONLY (HIV, STAGE 1 OR 2)" ~ 0,
+      `Disease Category` == "HIV AND AIDS SIMULTANEOUSLY (HIV, STAGE 3)" ~ 1,
+      `Disease Category` == "HIV AND LATER AIDS (HIV, STAGE 3)" ~ 1,
+      TRUE ~ NA_real_))
+  
+  county_diagnosis.df = county_diagnosis.df %>%
+    mutate(outcome = outcome_disease_categ_dx_bin) %>%
+    filter(!is.na(outcome))
+}
+
+if (outcome_var == "VLsupp") {
+    county_diagnosis.df = county_diagnosis.df %>%
+      mutate(outcome = `2022`) %>% 
+      filter(`Diagnosis year` <= 2022) %>%
+      filter(is.na(death_year) | death_year > 2022) %>%
+      mutate(outcome = case_when(
+    outcome == 0 ~ 0,
+    outcome == 1 ~ 1,
+    TRUE ~ 0))
+}
+
+
+
+```
+
+## Descriptive statistics
+
+The number of individuals not VL suppressed (outcome = 0) vs. number of individuals who are VL suppressed (outcome = 1)
+
+```{r desc_stats, echo=FALSE, message=FALSE, warning = FALSE}
+
+county_diagnosis.df %>% 
+  group_by(outcome) %>%
+  summarize(outcome_total = n()) %>%
+  kbl() %>%
+  kable_paper("hover", full_width = F)
+  
+```
+
+### Geographic map
+
+```{r desc_map, echo=FALSE, message=FALSE, warning = FALSE}
+
+zcta_data <- get_acs(
+  geography = "zcta",
+  variables = "B19013_001",
+  zcta = county_zip_list, 
+  geometry = TRUE
+)
+
+county_summary.df = county_diagnosis.df %>%
+  group_by(rsd_zip_cd) %>%
+  summarize(n_tot = n(),
+            n_outcome = sum(outcome)) %>%
+  ungroup() %>%
+  mutate(per_outcome = n_outcome/n_tot) %>%
+  mutate(rsd_zip_cd_cat = as.character(rsd_zip_cd))
+  
+
+zcta_level.df = left_join(zcta_data,
+                          county_summary.df,
+                          by = c("GEOID" = "rsd_zip_cd_cat"))
+
+zcta_level.df = left_join(zcta_level.df,
+                          zip_code_db %>% select(zipcode, lat, lng),
+                          by = c("GEOID" = "zipcode")) %>%
+  filter(!is.na(lat))
+
+break_num = 3
+pal_fun <- colorQuantile("YlOrRd", NULL, n = break_num)
+p_popup <- paste0("<strong>Proportion VL suppressed: </strong>", zcta_level.df$per_outcome)
+breaks_qt <- classIntervals(zcta_level.df$per_outcome, n = break_num, style = "quantile")
+
+leaflet(zcta_level.df) %>%
+  addPolygons(
+    stroke = FALSE, 
+    fillColor = ~pal_fun(per_outcome),
+    fillOpacity = 0.8, smoothFactor = 0.5,
+    popup = p_popup) %>%
+  addTiles()  %>%
+  addLegend("bottomright", 
+            colors = brewer.pal(break_num, "YlOrRd"), 
+            labels = paste0("up to ", format(breaks_qt$brks[-1], digits = 2)),
+            title =  'Proportion VL suppressed') %>%
+  addCircleMarkers(zcta_level.df$lng, zcta_level.df$lat, radius=zcta_level.df$n_tot/50, 
+                   color = "blue", 
+                   stroke = FALSE, fillOpacity = 0.5) 
+
+```
+
+### Geographic map
+
+```{r desc_demo, echo=FALSE, message=FALSE, warning = FALSE}
+
+race_prop.df = county_diagnosis.df %>%
+  group_by(Race.full.factor) %>%
+  summarize(total_n = n(),
+            late_diag_n = sum(outcome)) %>%
+  ungroup() %>%
+  mutate(prop = late_diag_n/total_n)
+
+p_race <-ggplot(race_prop.df, aes(x=Race.full.factor, y=prop, fill=Race.full.factor)) +
+  geom_bar(stat="identity")+theme_minimal() +
+  geom_text(aes(label=total_n), vjust=-1) +
+  labs(title="",
+       x="Race / Ethnicity", y = "Proportion VL suppressed") +
+  ylim(0,1) +
+  theme(axis.title.x = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 16)) +
+  guides(fill=guide_legend(title="Race / Ethnicity"))+
+  scale_fill_brewer(palette="Spectral")
+p_race
+
+exp_cat_prop.df = county_diagnosis.df %>%
+  group_by(`Exposure Category.factor`) %>%
+  summarize(total_n = n(),
+            late_diag_n = sum(outcome)) %>%
+  ungroup() %>%
+  mutate(prop = late_diag_n/total_n)
+
+p_exp_cat <-ggplot(exp_cat_prop.df, aes(x=`Exposure Category.factor`, y=prop, fill=`Exposure Category.factor`)) +
+  geom_bar(stat="identity")+theme_minimal() +
+  geom_text(aes(label=total_n), vjust=-1) +
+  labs(title="",
+       x="Exposure Category", y = "Proportion VL suppressed") +
+  ylim(0,1) +
+  theme(axis.title.x = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 16)) +
+  guides(fill=guide_legend(title="Exposure Risk")) +
+  scale_fill_brewer(palette="Spectral")
+p_exp_cat
+
+
+edu_cat_prop.df = county_diagnosis.df %>%
+  group_by(Education.factor) %>%
+  summarize(total_n = n(),
+            late_diag_n = sum(outcome)) %>%
+  ungroup() %>%
+  mutate(prop = late_diag_n/total_n)
+
+p_edu_cat <-ggplot(edu_cat_prop.df, aes(x=Education.factor, y=prop, fill=Education.factor)) +
+  geom_bar(stat="identity")+theme_minimal() +
+  geom_text(aes(label=total_n), vjust=-1) +
+  labs(title="",
+       x="Education Category", y = "Proportion VL suppressed") +
+  ylim(0,1) +
+  theme(axis.title.x = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 16)) +
+  guides(fill=guide_legend(title="Education")) +
+  scale_fill_brewer(palette="Spectral")
+p_edu_cat
+
+
+```
+
+## Individual-level analyses
+
+### Regression
+
+Individual-level variables to consider: 
+* predictor_diagnosis_year
+* Age.diagnosis
+* predictor_hispanic
+* predictor_idu
+* predictor_msm
+* predictor_education
+* predictor_birth_sex
+* clustered_2022
+
+First set of estimates and p-values are for univariate regression. The second set is for multivariate regression.
+
+```{r predictors, echo=FALSE, message=FALSE, warning = FALSE}
+
+county_diagnosis.df = county_diagnosis.df %>%
+  mutate(predictor_education = case_when(
+    Education == "<= 8TH GRADE" ~ 0,
+    Education == "SOME SCHOOL, LEVEL UNKNOWN" ~ 0,
+    Education == "SOME HIGH SCHOOL" ~ 0,
+    Education == "HIGH SCHOOL GRAD" ~ 0,
+    Education == "SOME COLLEGE" ~ 1,
+    Education == "COLLEGE DEGREE" ~ 1,
+    Education == "POST-GRADUATE WORK" ~ 1,
+    TRUE ~ NA_real_))
+
+county_diagnosis.df = county_diagnosis.df %>%
+  mutate(predictor_hispanic = case_when(
+    Race == "WHITE" ~ 0,
+    Race == "OTHER" ~ 0,
+    Race == "BLACK" ~ 0,
+    Race == "HISPANIC, ANY RACE" ~ 1,
+    TRUE ~ NA_real_))
+
+county_diagnosis.df = county_diagnosis.df %>%
+  mutate(predictor_msm = case_when(
+    `Exposure Category` == "MSM" ~ 1,
+    `Exposure Category` == "IDU" ~ 0,
+    `Exposure Category` == "NO REPORTED RISK" ~ 0,
+    `Exposure Category` == "MSM & IDU" ~ 1,
+    `Exposure Category` == "HETEROSEXUAL CONTACT" ~ 0,
+    `Exposure Category` == "OTHER" ~ 0,
+    `Exposure Category` == "PERINATAL EXPOSURE" ~ 0,
+    TRUE ~ NA_real_))
+
+county_diagnosis.df = county_diagnosis.df %>%
+  mutate(predictor_idu = case_when(
+    `Exposure Category` == "MSM" ~ 0,
+    `Exposure Category` == "IDU" ~ 1,
+    `Exposure Category` == "NO REPORTED RISK" ~ 0,
+    `Exposure Category` == "MSM & IDU" ~ 1,
+    `Exposure Category` == "HETEROSEXUAL CONTACT" ~ 0,
+    `Exposure Category` == "OTHER" ~ 0,
+    `Exposure Category` == "PERINATAL EXPOSURE" ~ 0,
+    TRUE ~ NA_real_))
+
+county_diagnosis.df = county_diagnosis.df %>%
+  mutate(predictor_diagnosis_year = `Diagnosis year`)
+
+county_diagnosis.df = county_diagnosis.df %>%
+  mutate(predictor_birth_sex = case_when(
+    `Birth Sex` == "FEMALE" ~ 0,
+    `Birth Sex` == "MALE" ~ 1,
+    TRUE ~ NA_real_))
+
+```
+
+
+```{r exploratory_analysis, echo=FALSE, message=FALSE, warning = FALSE}
+
+p_predictor_diagnosis_year <- ggplot(county_diagnosis.df, aes(x=predictor_diagnosis_year, y=outcome)) +
+  geom_point(col = "blue") +
+  geom_smooth(col = "red") +
+  labs(title="VL suppression  by Diagnosis Year",
+        x ="Diagnosis Year", y = "VL suppression ")
+
+p_predictor_diagnosis_year
+
+p_Age.diagnosis <- ggplot(county_diagnosis.df, aes(x=Age.diagnosis, y=outcome)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title="VL suppression  by Age at Diagnosis",
+        x ="Age at Diagnosis", y = "VL suppression ")
+
+p_Age.diagnosis
+
+p_zip_income <- ggplot(county_diagnosis.df, aes(x=Median_Income_Total, y=outcome)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title="VL suppression by Zip Code Level Income",
+        x ="Zip Code Level Income", y = "VL suppression ")
+
+p_zip_income
+
+p_percent_clustered_2022 <- ggplot(county_diagnosis.df, aes(x=percent_clustered_2022, y=outcome)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title="VL suppression by Zip Code Clustering",
+        x ="Zip Code Level Clustering", y = "VL suppression ")
+
+p_percent_clustered_2022
+
+```
+
+
+```{r Univariate_reg, echo=FALSE, message=FALSE, warning = FALSE}
+
+uni_reg_res.df = tibble(
+  variable = NULL,
+  estimate_uni = NULL,
+  p_val_uni = NULL
+)
+
+reg_variable_ind.vec = c(
+                 "predictor_diagnosis_year",
+                 "Age.diagnosis",
+                 "predictor_hispanic",
+                 "predictor_idu",
+                 "predictor_msm",
+                 "predictor_education",
+                 "predictor_birth_sex",
+                 "clustered_2022")
+
+for (reg_variable_ind in reg_variable_ind.vec) {
+
+  regression_formula <- paste0("outcome", " ~ ", reg_variable_ind)
+
+  uni_reg = glm(as.formula(regression_formula), 
+              family = binomial(),
+              data = county_diagnosis.df)
+
+  uni_reg_sum = summary(uni_reg)
+  uni_reg_res_TEMP.df = tibble(
+    variable = reg_variable_ind,
+    estimate_uni = uni_reg_sum$coefficients[2,c(1)],
+    p_val_uni = uni_reg_sum$coefficients[2,c(4)]
+  )
+  
+  uni_reg_res.df = bind_rows(uni_reg_res.df, uni_reg_res_TEMP.df)
+}
+
+```
+
+```{r multivariate_reg, echo=FALSE, message=FALSE, warning = FALSE}
+
+regression_formula <- paste0("outcome", " ~ ", paste0(reg_variable_ind.vec, collapse = " + "))
+
+multi_reg = glm(as.formula(regression_formula), 
+            family = binomial(),
+            data = county_diagnosis.df)
+
+multi_reg_sum = summary(multi_reg)
+multi_reg_res.df = tibble(
+  variable = rownames(multi_reg_sum$coefficients)[c(2:nrow(multi_reg_sum$coefficients))],
+  estimate_multi = multi_reg_sum$coefficients[2:nrow(multi_reg_sum$coefficients),c(1)],
+  p_val_multi = multi_reg_sum$coefficients[2:nrow(multi_reg_sum$coefficients),c(4)]
+)
+
+
+full_join(uni_reg_res.df, multi_reg_res.df, by = "variable") %>%
+  kbl() %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+### Machine Learning: Random Forest
+
+```{r machine_learning, echo=FALSE, message=FALSE, warning = FALSE}
+
+county_diagnosis_ML.df = county_diagnosis.df %>%
+  select(c(outcome, reg_variable_ind.vec))
+
+county_diagnosis_ML.df <- county_diagnosis_ML.df[complete.cases(county_diagnosis_ML.df),]
+
+county_diagnosis_ML.df = county_diagnosis_ML.df %>%
+  mutate(outcome = as.factor(outcome))
+
+set.seed(107)
+inTrain <- createDataPartition(
+  y = county_diagnosis_ML.df$outcome, ## the outcome data are needed
+  p = .75, ## The percentage of data in the training set
+  list = FALSE
+)
+
+training <- county_diagnosis_ML.df[ inTrain,]
+testing  <- county_diagnosis_ML.df[-inTrain,]
+
+trControl <- trainControl(method = "cv",
+    number = 10,
+    search = "grid")
+
+rf_model = train(outcome ~ .,
+      data = training,
+      method = "rf",
+      trControl = trainControl(),
+      tuneGrid = NULL)
+
+
+```
+
+#### Plot: Variable importance
+
+```{r machine_learning_plot, echo=FALSE, message=FALSE, warning = FALSE}
+
+rf_model_Imp <- varImp(rf_model, scale = FALSE)
+
+plot(rf_model_Imp)
+```
+
+#### Table: Prediction assessment
+
+```{r machine_learning_prediction, echo=FALSE, message=FALSE, warning = FALSE}
+
+rf_test <- predict(rf_model, newdata = testing)
+confusionMatrix(rf_test, as.factor(testing$outcome))
+```
+
+## Zip Code-level predictors
+
+### Regression
+
+zip code-level variables to consider: 
+
+* Median income
+* Percent in poverty
+* Percent clustered in 2022
+
+First set of estimates and p-values are for univariate regression. The second set is for multivariate regression.
+
+```{r county_predictors, echo=FALSE, message=FALSE, warning = FALSE}
+
+county_diagnosis.df = county_diagnosis.df %>%
+  mutate(predictor_county_per_poverty = Poverty / Gender_All)
+
+```
+
+
+```{r county_univariate_reg, echo=FALSE, message=FALSE, warning = FALSE}
+ 
+reg_variable_zip.vec = c(
+                 "Median_Income_Total",
+                 "predictor_county_per_poverty",
+                 "percent_clustered_2022"
+                 )
+
+reg_variable.vec = c(reg_variable_ind.vec, reg_variable_zip.vec)
+
+uni_reg_res.df = tibble(
+  variable = NULL,
+  estimate_uni = NULL,
+  p_val_uni = NULL
+)
+
+for (reg_variable in reg_variable.vec) {
+
+  regression_formula <- paste0("outcome", " ~ ", reg_variable)
+
+  uni_reg = glm(as.formula(regression_formula), 
+              family = binomial(),
+              data = county_diagnosis.df)
+
+  uni_reg_sum = summary(uni_reg)
+  uni_reg_res_TEMP.df = tibble(
+    variable = reg_variable,
+    estimate_uni = uni_reg_sum$coefficients[2,c(1)],
+    p_val_uni = uni_reg_sum$coefficients[2,c(4)]
+  )
+  
+  uni_reg_res.df = bind_rows(uni_reg_res.df, uni_reg_res_TEMP.df)
+}
+
+```
+
+```{r county_multivariate_reg, echo=FALSE, message=FALSE, warning = FALSE}
+
+regression_formula <- paste0("outcome", " ~ ", paste0(reg_variable.vec, collapse = " + "))
+
+multi_reg = glm(as.formula(regression_formula), 
+            family = binomial(),
+            data = county_diagnosis.df)
+
+multi_reg_sum = summary(multi_reg)
+multi_reg_res.df = tibble(
+  variable = rownames(multi_reg_sum$coefficients)[c(2:nrow(multi_reg_sum$coefficients))],
+  estimate_multi = multi_reg_sum$coefficients[2:nrow(multi_reg_sum$coefficients),c(1)],
+  p_val_multi = multi_reg_sum$coefficients[2:nrow(multi_reg_sum$coefficients),c(4)]
+)
+
+
+full_join(uni_reg_res.df, multi_reg_res.df, by = "variable") %>%
+  kbl() %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+### Machine_learning
+
+```{r county_machine_learning, echo=FALSE, message=FALSE, warning = FALSE}
+
+county_diagnosis_ML.df = county_diagnosis.df %>%
+  select(c(outcome, reg_variable.vec))
+
+county_diagnosis_ML.df <- county_diagnosis_ML.df[complete.cases(county_diagnosis_ML.df),]
+
+county_diagnosis_ML.df = county_diagnosis_ML.df %>%
+  mutate(outcome = as.factor(outcome))
+
+set.seed(107)
+inTrain <- createDataPartition(
+  y = county_diagnosis_ML.df$outcome, ## the outcome data are needed
+  p = .75, ## The percentage of data in the training set
+  list = FALSE
+)
+
+training <- county_diagnosis_ML.df[ inTrain,]
+testing  <- county_diagnosis_ML.df[-inTrain,]
+
+trControl <- trainControl(method = "cv",
+    number = 10,
+    search = "grid")
+
+rf_model_county = train(outcome ~ .,
+      data = training,
+      method = "rf",
+      trControl = trainControl(),
+      tuneGrid = NULL)
+
+
+```
+
+#### Plot: Variable importance
+
+```{r county_machine_learning_plot, echo=FALSE, message=FALSE, warning = FALSE}
+
+rf_model_Imp <- varImp(rf_model_county, scale = FALSE)
+
+plot(rf_model_Imp)
+```
+
+
+#### Table: Prediction
+
+```{r county_machine_learning_prediction, echo=FALSE, message=FALSE, warning = FALSE}
+
+rf_test <- predict(rf_model_county, newdata = testing)
+confusionMatrix(rf_test, as.factor(testing$outcome))
+```
