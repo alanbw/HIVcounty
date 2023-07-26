@@ -1,17 +1,15 @@
 ---
-title: "Clark_County_VLsupp.R"
-author: "ravi"
-date: "4/30/2023"
-output:
-  word_document: default
-  html_document: default
+title: "HIVcountry_main"
+author: "Ravi"
+date: "2023-07-21"
+output: html_document
 ---
-
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
 directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/"
+
 county_demo_file_subloc = "Clark_County_data/clark_county_demographics.csv"
 county_zip_file_subloc = "Clark_County_data/clark_county_by_zip.csv"
 county_vl_file_subloc = "Clark_County_data/clark_viral_suppression_by_year.csv"
@@ -23,6 +21,8 @@ county_vl_file_subloc = "Clark_County_data/clark_viral_suppression_by_year.csv"
 outcome_var = "HIVstage"
 outcome_var = "VLsupp"
 title_a = "Proportion VL Suppression"
+lab_x_a = "Proportion VL Suppression"
+lab_y_a = "Proportion VL Suppression"
 ```
 
 
@@ -42,9 +42,6 @@ library('RColorBrewer')
 source("/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/HIVcounty/HIVcounty_func.R")
 ```
 
-## Research question
-
-Research Question 3: Identify predictors (including viral clustering) that are associated with high rates of viral load suppression. 
 
 ## Create analytic dataset
 
@@ -53,7 +50,6 @@ We create an analytic dataset that includes individual and zip code level covari
 ```{r dataset, echo=FALSE, message=FALSE, warning = FALSE}
 
 county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
-county_zip_list = search_county("San Diego", "CA") %>% pull(zipcode)
 
 county_diagnosis.df  = read_county_data(directory_loc = directory_loc,
                              county_demo_file_subloc = county_demo_file_subloc,
@@ -66,18 +62,22 @@ county_diagnosis.df  = read_county_data(directory_loc = directory_loc,
 
 Number of individuals after filtering to diagnosed in county: `r county_diagnosis.df %>% nrow()`
 
+## Research question
+
+Research Question 3: Identify predictors (including viral clustering) that are associated with high rates of stage 3-4 new diagnoses. 
+
 ## Outcome generation
 
 We dichotomize the HIV stage of an individual.
 
-* VL > 200
+* HIV ONLY (HIV, STAGE 1 OR 2) 
 
 VS
 
-* VL <= 200
+* HIV AND AIDS SIMULTANEOUSLY (HIV, STAGE 3)
+* HIV AND LATER AIDS (HIV, STAGE 3)
 
-```{r outcomes, echo=FALSE, message=FALSE, warning = FALSE}
-
+```{r outcomes_diagnosis, echo=FALSE, message=FALSE, warning = FALSE}
 
 if (outcome_var == "HIVstage") {
   county_diagnosis.df = county_diagnosis.df %>%
@@ -91,7 +91,9 @@ if (outcome_var == "HIVstage") {
     mutate(outcome = outcome_disease_categ_dx_bin) %>%
     filter(!is.na(outcome))
 }
+```
 
+```{r outcomes_VLsupp, echo=FALSE, message=FALSE, warning = FALSE}
 if (outcome_var == "VLsupp") {
     county_diagnosis.df = county_diagnosis.df %>%
       mutate(outcome = `2022`) %>% 
@@ -102,14 +104,11 @@ if (outcome_var == "VLsupp") {
     outcome == 1 ~ 1,
     TRUE ~ 0))
 }
-
-
-
 ```
 
 ## Descriptive statistics
 
-The number of individuals not VL suppressed (outcome = 0) vs. number of individuals who are VL suppressed (outcome = 1)
+The number of individuals in Stages 1 or 2 (outcome = 0) vs. number of individuals in Stage 3
 
 ```{r desc_stats, echo=FALSE, message=FALSE, warning = FALSE}
 
@@ -152,7 +151,7 @@ zcta_level.df = left_join(zcta_level.df,
 
 break_num = 3
 pal_fun <- colorQuantile("YlOrRd", NULL, n = break_num)
-p_popup <- paste0("<strong>Proportion VL suppressed: </strong>", zcta_level.df$per_outcome)
+p_popup <- paste0("<strong>", title_a, ": </strong>", zcta_level.df$per_outcome)
 breaks_qt <- classIntervals(zcta_level.df$per_outcome, n = break_num, style = "quantile")
 
 leaflet(zcta_level.df) %>%
@@ -165,13 +164,12 @@ leaflet(zcta_level.df) %>%
   addLegend("bottomright", 
             colors = brewer.pal(break_num, "YlOrRd"), 
             labels = paste0("up to ", format(breaks_qt$brks[-1], digits = 2)),
-            title =  'Proportion VL suppressed') %>%
+            title =  title_a) %>%
   addCircleMarkers(zcta_level.df$lng, zcta_level.df$lat, radius=zcta_level.df$n_tot/50, 
                    color = "blue", 
                    stroke = FALSE, fillOpacity = 0.5) 
 
 ```
-
 ### Geographic map
 
 ```{r desc_demo, echo=FALSE, message=FALSE, warning = FALSE}
@@ -187,7 +185,7 @@ p_race <-ggplot(race_prop.df, aes(x=Race.full.factor, y=prop, fill=Race.full.fac
   geom_bar(stat="identity")+theme_minimal() +
   geom_text(aes(label=total_n), vjust=-1) +
   labs(title="",
-       x="Race / Ethnicity", y = "Proportion VL suppressed") +
+       x="Race / Ethnicity", y = "Proportion Late Diagnosis") +
   ylim(0,1) +
   theme(axis.title.x = element_text(size = 16),
         axis.text.x = element_blank(),
@@ -207,7 +205,7 @@ p_exp_cat <-ggplot(exp_cat_prop.df, aes(x=`Exposure Category.factor`, y=prop, fi
   geom_bar(stat="identity")+theme_minimal() +
   geom_text(aes(label=total_n), vjust=-1) +
   labs(title="",
-       x="Exposure Category", y = "Proportion VL suppressed") +
+       x="Exposure Category", y = lab_y_a) +
   ylim(0,1) +
   theme(axis.title.x = element_text(size = 16),
         axis.text.x = element_blank(),
@@ -228,7 +226,7 @@ p_edu_cat <-ggplot(edu_cat_prop.df, aes(x=Education.factor, y=prop, fill=Educati
   geom_bar(stat="identity")+theme_minimal() +
   geom_text(aes(label=total_n), vjust=-1) +
   labs(title="",
-       x="Education Category", y = "Proportion VL suppressed") +
+       x="Education Category", y = lab_y_a) +
   ylim(0,1) +
   theme(axis.title.x = element_text(size = 16),
         axis.text.x = element_blank(),
@@ -310,43 +308,45 @@ county_diagnosis.df = county_diagnosis.df %>%
 
 ```
 
-
 ```{r exploratory_analysis, echo=FALSE, message=FALSE, warning = FALSE}
 
 p_predictor_diagnosis_year <- ggplot(county_diagnosis.df, aes(x=predictor_diagnosis_year, y=outcome)) +
   geom_point(col = "blue") +
   geom_smooth(col = "red") +
-  labs(title="VL suppression  by Diagnosis Year",
-        x ="Diagnosis Year", y = "VL suppression ")
+  labs(title=paste0(lab_y_a, "by Diagnosis Year"),
+        x ="Diagnosis Year", y = lab_y_a)
 
 p_predictor_diagnosis_year
 
 p_Age.diagnosis <- ggplot(county_diagnosis.df, aes(x=Age.diagnosis, y=outcome)) +
   geom_point() +
   geom_smooth() +
-  labs(title="VL suppression  by Age at Diagnosis",
-        x ="Age at Diagnosis", y = "VL suppression ")
+  labs(title=paste0(lab_y_a, "by Age at Diagnosis"),
+        x ="Age at Diagnosis", y = lab_y_a)
 
 p_Age.diagnosis
 
 p_zip_income <- ggplot(county_diagnosis.df, aes(x=Median_Income_Total, y=outcome)) +
   geom_point() +
   geom_smooth() +
-  labs(title="VL suppression by Zip Code Level Income",
-        x ="Zip Code Level Income", y = "VL suppression ")
+  labs(title=paste0(lab_y_a, "by Zip Code Level Income"),
+        x ="Zip Code Level Income", y = lab_y_a)
 
 p_zip_income
 
 p_percent_clustered_2022 <- ggplot(county_diagnosis.df, aes(x=percent_clustered_2022, y=outcome)) +
   geom_point() +
   geom_smooth() +
-  labs(title="VL suppression by Zip Code Clustering",
-        x ="Zip Code Level Clustering", y = "VL suppression ")
+  labs(title=paste0(lab_y_a, "by Zip Code Clustering"),
+        x ="Zip Code Level Clustering", y = lab_y_a)
 
 p_percent_clustered_2022
 
-```
+county_diagnosis.df %>%
+  group_by(clustered_2022, outcome) %>%
+  summarize(n=n()) 
 
+```
 
 ```{r Univariate_reg, echo=FALSE, message=FALSE, warning = FALSE}
 
@@ -407,7 +407,6 @@ full_join(uni_reg_res.df, multi_reg_res.df, by = "variable") %>%
   kable_paper("hover", full_width = F)
 
 ```
-
 ### Machine Learning: Random Forest
 
 ```{r machine_learning, echo=FALSE, message=FALSE, warning = FALSE}
@@ -537,7 +536,6 @@ full_join(uni_reg_res.df, multi_reg_res.df, by = "variable") %>%
   kable_paper("hover", full_width = F)
 
 ```
-
 ### Machine_learning
 
 ```{r county_machine_learning, echo=FALSE, message=FALSE, warning = FALSE}
@@ -581,7 +579,6 @@ rf_model_Imp <- varImp(rf_model_county, scale = FALSE)
 
 plot(rf_model_Imp)
 ```
-
 
 #### Table: Prediction
 
