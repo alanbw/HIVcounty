@@ -31,14 +31,12 @@ library('nlme')
 
 ```{r data, include=FALSE}
 
-source("/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/HIVcounty/HIVcounty_func.R")
+source("~/Documents/Projects/Nevada/HIVcounty/HIVcounty_func.R")
 
-directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/"
+directory_loc = "~/Documents/Projects/Nevada/HIVcounty/"
 
-county_demo_file_subloc = "Clark_County_data/clark_county_demographics.csv"
-county_zip_file_subloc = "Clark_County_data/clark_county_by_zip.csv"
-county_vl_file_subloc = "Clark_County_data/clark_viral_suppression_by_year.csv"
-
+county_demo_file_subloc = "clark_county_demographics.csv"
+county_zip_file_subloc =  "clark_county_by_zip.csv"
 county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
 
 #county_demo_file_subloc = "San_Diego_data/sd_county_demographics.csv"
@@ -61,8 +59,7 @@ We create an analytic dataset that includes individual and zip code level covari
 county.df  = read_county_data(directory_loc = directory_loc,
                              county_demo_file_subloc = county_demo_file_subloc,
                              county_zip_file_subloc = county_zip_file_subloc,
-                             county_zip_list = county_zip_list,
-                             county_vl_file_subloc = county_vl_file_subloc
+                             county_zip_list = county_zip_list
                              ) 
 ```     
 
@@ -93,10 +90,10 @@ county.df = county.df %>%
     TRUE ~ NA_real_))
 
 county.df = county.df %>%
-  mutate(outcome_care = as.numeric(`2022` %in% c(0,1))) 
+  mutate(outcome_care =`In_care_2022`) 
 
 county.df = county.df %>%
-  mutate(outcome_TEMP = `2022`) %>%
+  mutate(outcome_TEMP = `VL_supp_2022`) %>%
   mutate(outcome_vl_supp = case_when(
     outcome_TEMP == 0 ~ 0,
     outcome_TEMP == 1 ~ 1,
