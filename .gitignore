@@ -1,0 +1,14 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+data
+*.csv
+*.Rdata
+*.html
+.DS_Store
+2023 SNHD testing sites.xlsx
+Clark_County_2022_Individual_predictors.qmd
+Resultsoutcome_care_map.png
+Resultsoutcome_diagnosis_map.png
+Resultsoutcome_vl_supp_map.png
