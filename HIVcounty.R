@@ -257,7 +257,7 @@ for (i in c(1:length(outcome_var_list))) {
   
   desc_res.df = county.df %>%
     select(all_of(reg_variable.vec), !! outcome_var_i) %>%
-    tbl_summary(by = outcome_diagnosis) %>% as_tibble() %>%
+    tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
     rename(variable = `**Characteristic**`)
   
   uni_reg_res.df = univariate_reg(county.df = county.df,
@@ -297,7 +297,8 @@ for (i in c(1:length(outcome_var_list))) {
   HIV_geomap = geo_map(county.df = county.df,
                        county_zip_list = county_zip_list,
                        outcome_var = outcome_var_list[i],
-                       geo_zip_var = random_effect_var_list[i]) 
+                       geo_zip_var = random_effect_var_list[i],
+                       title_a = outcome_var_list[i]) 
   
   mapshot(HIV_geomap, file = paste0(result_file_loc, outcome_var_i, "_map.png", sep = ""))
   

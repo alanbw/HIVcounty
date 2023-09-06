@@ -184,7 +184,8 @@ Lasso_reg <- function(county.df,
 geo_map <- function(county.df,
                     county_zip_list,
                     outcome_var,
-                    geo_zip_var) {
+                    geo_zip_var,
+                    title_a) {
   
   zcta_data <- get_acs(
     geography = "zcta",
