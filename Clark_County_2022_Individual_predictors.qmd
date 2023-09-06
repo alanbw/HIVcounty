@@ -1,0 +1,379 @@
+---
+title: "Clark County Individual Predictors Data Request"
+author: 
+  name: "Anti-Viral Research Center<br>University of California, San Diego<br>Department of Infectious Diseases"
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-location: left
+    toc-depth: 3
+    page-layout: full
+date: "`r format(Sys.time(), '%d %B %Y')`"
+warning: false
+echo: false
+include: false
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+# Manual version:
+# onedrive_path <- "C:/Users/Geoffrey Lizar/OneDrive - University of California, San Diego Health/Clark County/Data/"
+
+# OneDrive path:
+onedrive_path <- readLines("OneDrivePath.txt")
+cur_data_path <- paste0(onedrive_path, "Current_Data/")
+
+# Read in the data:
+load(paste(cur_data_path, "Nevada_eHARS_alltables_073123.Rdata", sep = ""))
+
+# Quarto Libraries
+library(flextable)
+library(tableone)
+
+# Cluster Growth libraries
+library(tidyverse)
+library(igraph)
+library(sf)
+library(ggspatial)
+library(viridis)
+library(DiagrammeR)
+library(zipcodeR)
+data("zip_code_db", package = "zipcodeR")
+
+# Useful functions: 
+# Converts tableone to a useable dataframe
+tableone_to_tibble <- function(tab) {
+  tib <- as_tibble(tab) %>% 
+    mutate(` ` = rownames(tab)) %>% 
+    relocate(` `)
+  return(tib)
+}
+# Create flextable with nice formatting
+# Usecase with table one is 
+# [tableone_table] %>% print(missing = FALSE, explain = FALSE, showAllLevels = TRUE) %>% 
+  # tableone_to_tibble() %>% nice_tab()
+nice_tab <- function(tab, rows = NULL, bold = FALSE) {
+  # Slice some rows
+  if(!is.null(rows)) tab <- tab |> slice(rows)
+  tab <- tab |> flextable()
+  # Make first row bold
+  if(bold == TRUE) tab <- tab |> bold(i = 1, part = "body")
+  tab |> 
+    align(j = 1, align = "left", part = "body") |> 
+    autofit()
+}
+
+distance.cutoff <- 0.015
+last_quarter <- as.Date("01102021", format = "%d%m%Y")
+
+
+#################### ZIP CODE DATA ########################
+# Load in R's zip code database; keep only county/zipcode
+data("zip_code_db")
+# Just Clark County zip codes
+zip_codes_clark <- zip_code_db %>%
+  dplyr::filter(state == "NV" & county == "Clark County") %>%
+  dplyr::select(c(zipcode, county))
+# Just San Diego zip codes
+zip_codes_sd <- zip_code_db %>%
+  dplyr::filter(state == "CA" & county == "San Diego County") %>%
+  dplyr::select(c(zipcode, county))
+# Pre-select for just zip/county
+zip_code_db <- zip_code_db %>% 
+  dplyr::select(c(zipcode, county)) 
+#################### END ZIP CODE DATA ####################
+
+```
+
+# Introduction
+
+In this file, we generate a number of binary individual-level predictors
+for the Clark County data, marked as 1 (True) or 0 (False). These predictors and
+their criteria include:
+
+-   Sequence_ever: A binary variable if the individual has ever had a
+    sequence collected
+
+-   Sequence_30day_diagnosis: A binary variable if the individual had a
+    sequence collected within the first 30 days after diagnosis
+
+    -   For this variable, sequence date is compared to diagnosis date.
+        Because we only have month-level detail for Clark County dates
+        (e.g., a diagnosis on January 1st and January 31st are
+        represented with the same value), adjacent months are allowed;
+        e.g., if an individual was diagnosed in January and had a
+        sequence collected in February, this variable is marked as 1.
+
+-   In_care_2022: A binary variable if the individual is in care at the
+    end of 2022. In care is defined as the following:
+
+    -   Had a CD4, VL, or genome collected in 2022 or in the last
+        quarter (October--December) of 2021
+
+-   In_care_2022_restrict: A binary variable if the individual is in
+    care at the end of 2022. In care is defined as the following:
+
+    -   Had a CD4, VL, or genome collected in 2022
+
+-   VL_supp_2022: A binary variable if the individual is VL suppressed
+    at the end of 2022. VL suppression is defined as the following:
+
+    -   Last VL labs in 2022 is \< 200
+
+    -   If there are no VL labs in 2022, a lab in the last quarter
+        (October--December) of 2021 can be used
+
+-   VL_supp_2022_restrict: A binary variable if the individual is VL
+    suppressed at the end of 2022. VL suppression is defined as the
+    following: Last VL labs in 2022 is \< 200
+
+-   clustered_2022: A binary variable if the individuals clustered
+    genetically with someone at the end of 2022.
+
+```{r}
+# This section should be removed after labs.all is added to the alltables data file
+vl_demo <- data.frame(
+  # Duplicate the UCI column because we're stacking 2 columns on top of each other
+  UCI = rep(demographics$UCI,2),
+  # Bind recent and first VL tests
+  result = c(demographics$vl_first_det_value,demographics$vl_recent_value),
+  # Need to keep the dates
+  sample_dt = c(demographics$vl_first_dt, 
+                demographics$vl_recent_dt),
+  sample_dt_fmt = c(demographics$vl_first_dt_fmt, 
+                    demographics$vl_recent_dt_fmt),
+  # Mark as VL from demographics dataset
+  lab_test_cd = 'EC-014', 
+  result_units = "C/ML", 
+  source = 'demo') %>% 
+  filter(sample_dt != ".") %>%
+  mutate(result_interpretation = ifelse(result %in% "<", "<", NA), 
+         result = as.numeric(result))
+
+cd4_demo <- data.frame(
+  UCI = rep(demographics$UCI, 4),
+  sample_dt = c(demographics$cd4_vl_first_hiv_dt, 
+                demographics$cd4_low_cnt_dt, 
+                demographics$cd4_recent_dt, 
+                demographics$cd4_recent_dt), 
+  sample_dt_fmt = c(demographics$cd4_vl_first_hiv_dt_fmt, 
+                    demographics$cd4_low_cnt_dt_fmt, 
+                    demographics$cd4_recent_dt_fmt, 
+                    demographics$cd4_recent_dt_fmt), 
+  result = c(demographics$cd4_first_hiv_value, 
+             demographics$cd4_low_cnt_value, 
+             demographics$cd4_recent_cnt_value, 
+             demographics$cd4_recent_pct_value),
+  result_units = c(demographics$cd4_first_hiv_type, 
+                   rep("CNT", nrow(demographics)), 
+                   rep("CNT", nrow(demographics)), 
+                   rep("PCT", nrow(demographics))), 
+  source = "demo") %>%
+  filter(sample_dt != ".") %>% 
+  mutate(lab_test_cd = ifelse(result_units == "CNT", "EC-016", 
+                              ifelse(result_units == "PCT", "EC-017", NA)))
+
+labs.all <- bind_rows(labs %>% mutate(source = "labs"), 
+                      vl_demo, 
+                      cd4_demo) %>%
+   mutate(result_interpretation = ifelse(result %in% '<','<',result_interpretation),
+         # as.numeric() will turn any remaining ">" or "=" into NA values; this is fine
+         result = ifelse(result %in% '<',"20",result) %>% as.numeric()) %>%
+  distinct(UCI, sample_dt_fmt, result, result_units, lab_test_cd, .keep_all = T) %>%
+  arrange(UCI,sample_dt)
+```
+# Sequence_ever and Sequence_30day_diagnosis
+
+Using the complete list of IDs in the demographics dataset, we checked to see if a sequence was available in the genotypes dataset. If one was available, the Sequence_ever variable was marked as 1 (if not, the variable was set to 0). For Sequence_30day_diagnosis, we used the first sequence date for each individual, available in the genotypes.baseline dataset. If the baseline sequence was collected within 30 days of diagnosis, the variable was set to 1; otherwise, it was set to 0.
+
+```{r}
+predictors_df <- demographics %>% 
+  select(c(UCI, hiv_aids_dx_dt_fmt,`Diagnosis year`,death_year,rsd_zip_cd)) %>%
+  #diagnosed prior to 2022 and also alive at least sometime in 2022 (i.e. did not die in 2021 or earlier)
+  mutate(dead_or_notDX = 2022 < `Diagnosis year` | 
+                               (!is.na(death_year) & death_year < 2022)) %>%
+  # If a baseline sequence is available, mark as 1
+  left_join(genotypes.baseline %>%
+              group_by(UCI) %>%
+              summarise(Sequence_ever = 1), 
+            by = "UCI") %>%
+  # Any that don't have a sequence, mark as 0
+  mutate(Sequence_ever = ifelse(is.na(Sequence_ever), 0, Sequence_ever)) %>%
+  # Join in baseline sample date
+  left_join(genotypes.baseline %>%
+              select(c(UCI, sample_dt_fmt)), 
+            by = "UCI") %>%
+  # Compare sample date and dx date; if <=31 days (adjacent months), mark as 1. Otherwise, 0
+  mutate(Sequence_30day_diagnosis = ifelse(difftime(time1 = sample_dt_fmt, 
+                                                    time2 = hiv_aids_dx_dt_fmt, 
+                                                    units = "days") <= 31, 1, 0), 
+         Sequence_30day_diagnosis = ifelse(is.na(Sequence_30day_diagnosis), 0, Sequence_30day_diagnosis)) %>%
+  select(-c(sample_dt_fmt, hiv_aids_dx_dt_fmt))
+
+```
+
+# In_care_2022 and In_care_2022_restrict
+
+For these, an individual is considered to be in care if they have a lab or genotype within the relevant period; for In_care_2022, the range is October 2021 through the end of 2022, and for In_care_2022_restrict, the range is reduced to just 2022. For all individuals in the demographics dataset, if a test existed in the relevant time range, the variable was marked with a 1; otherwise, it was marked with a 0.
+
+```{r}
+labs_with_geno <- bind_rows(labs.all %>% select(c(UCI, sample_dt_fmt)), 
+                            genotypes %>% select(c(UCI, sample_dt_fmt))) %>%
+  filter(sample_dt_fmt >= last_quarter & year(sample_dt_fmt) < 2023)
+lwg_restrict <- labs_with_geno %>% filter(year(sample_dt_fmt) %in% 2022)
+dim(lwg_restrict)
+predictors_df <- predictors_df %>% 
+  
+  mutate(In_care_2022 = ifelse(dead_or_notDX, NA, ifelse(UCI %in% labs_with_geno$UCI, 1, 0)),
+         In_care_2022_restrict = ifelse(dead_or_notDX, NA, ifelse(UCI %in% lwg_restrict$UCI, 1, 0)))
+# %>%
+#   mutate(In_care_2022 = ifelse(UCI %in% labs_with_geno$UCI, 1, 0), 
+#          In_care_2022_restrict = ifelse(UCI %in% lwg_restrict$UCI, 1, 0))
+```
+
+# VL_supp_2022 and VL_supp_2022_restrict
+
+An individual is virally suppressed if the value for the most recent VL test is < 200 C/ML. If multiple VL tests occurred on the most recent date, for an individual to be considered suppressed, all VL tests on that date must meet the threshold for suppression. VL tests were grouped by individual and filtered to the most recent date of testing. Individuals were marked as suppressed (1) or unsuppressed (0) in the relevant time periods for VL_supp_2022 and VL_supp_2022_restrict
+
+```{r}
+labs_vl <- labs.all %>% 
+  filter(lab_test_cd %in% c("EC-014", "EC-015") & sample_dt_fmt >= last_quarter & year(sample_dt_fmt) < 2023) %>%
+   mutate(supp = ifelse(result < 200, T, F), 
+         supp = ifelse(result_interpretation %in% "<" & result == 200, T, supp)) %>%
+  arrange(UCI) %>% 
+  group_by(UCI) %>%
+  filter(sample_dt_fmt == max(sample_dt_fmt, na.rm = T)) %>%
+  summarise(sample_dt_fmt = max(sample_dt_fmt, na.rm = T), 
+            indiv_supp = ifelse(all(supp), T, F)) %>%
+  ungroup() %>%
+  filter(indiv_supp)
+  
+labs_vl_restrict <- labs_vl %>% filter(as.numeric(year(sample_dt_fmt)) == 2022)
+
+# predictors_df2 <- predictors_df %>%
+#   mutate(VL_supp_2022 =ifelse(UCI %in% labs_vl$UCI, 1, 0),
+#          VL_supp_2022_restrict = ifelse(UCI %in% labs_vl_restrict$UCI, 1, 0))
+
+#do we want to set death_year < 2022 or death_year < 2021 (i.e. were alive at least some time 2021) Should probably use 2022 since if someone died in 2021 they wouldn't have any data for 2022
+predictors_df <- predictors_df %>%
+  mutate(VL_supp_2022 = ifelse(dead_or_notDX, NA, ifelse(UCI %in% labs_vl$UCI, 1, 0)),
+         VL_supp_2022_restrict = ifelse(dead_or_notDX, NA, ifelse(UCI %in% labs_vl_restrict$UCI, 1, 0)))
+
+# ~3400 suppressed using old method, 3900 in new method
+# v1 <- read.csv('~/Documents/Projects/Nevada/Geoff/viral suppression/v2/clark_viral_suppression_by_year.csv')
+# table(v1$supp_2022)
+# table(predictors_df$VL_supp_2022)
+# table(predictors_df$VL_supp_2022_restrict)
+```
+
+# clustered_2022
+
+Individuals are considered to be clustered with each other if the genetic distance between their baseline sequence is < 1.5%. Distance was calculated with the tn93 algorithm, and clustering was done with the cluster_louvain function from the igraph package in R. A cluster begins with 3 members, and the cluster start date is defined as the baseline sequence date of the 3rd member of the cluster. Because we are interested in whether individuals are clustered at the end of 2022, we removed sequences that were gathered in 2023, then ran the clustering algorithm. If an individual was a member of a cluster of size 3+ by the end of 2022, the column clustered_2022 was marked as 1; otherwise, it was 0.
+
+```{r}
+# Clustering
+date_cutoff <- as.Date("20221231", format = "%Y%m%d")
+
+###############################################
+dist_data <- read.csv(paste0(cur_data_path, "input_baseline.pwd.limit.0.015.csv")) %>%
+  separate(col = ID1, into = c("pid1", "date1"), sep = "\\_", remove = F) %>%
+  separate(col = ID2, into = c("pid2", "date2"), sep = "\\_", remove = F) %>%
+  mutate(sampling_date1 = as.Date(paste0("01", date1), format = "%d%b%Y"),
+         sampling_date2 = as.Date(paste0("01", date2), format = "%d%b%Y"))
+
+# filter out older sequences from same pairs
+dist_data_unique <- bind_rows(
+  dist_data %>% 
+    select(c(ID1, pid1, sampling_date1)) %>% 
+    rename(ID = ID1, 
+           pid = pid1, 
+           sampling_date = sampling_date1), 
+  dist_data %>% 
+    select(c(ID2, pid2, sampling_date2)) %>% 
+    rename(ID = ID2, 
+           pid = pid2, 
+           sampling_date = sampling_date2)) %>%
+  distinct() %>%
+  arrange(pid, sampling_date) %>%
+  group_by(pid) %>%
+  slice(1) %>%
+  ungroup()
+
+dist_data <- dist_data %>%
+  filter(ID1 %in% dist_data_unique$ID & 
+           ID2 %in% dist_data_unique$ID & 
+           !(ID1 == ID2) & 
+           !(pid1 == pid2) &  
+           Distance < distance.cutoff &
+           sampling_date1 <= date_cutoff &
+           sampling_date2 <= date_cutoff) %>%
+  mutate(label = 1)
+
+# This is the clustering bit
+edges <- dist_data %>% 
+  select(c("ID1", "ID2")) %>% 
+  rename(from = ID1, 
+         to = ID2) %>%
+  mutate(width = 1)
+
+#Create graph for Louvain
+graph <- graph_from_data_frame(edges, directed = FALSE)
+
+# Set the seed
+set.seed(1)
+
+# Louvain Comunity Detection
+cluster <- cluster_louvain(graph)
+
+cluster_df <- membership(cluster) %>%
+  as.data.frame() %>%
+  rownames_to_column("label") %>%
+  rename(clusterID = x) %>% 
+  separate(col = label, into = c("UCI", "date"), sep="\\_", remove = F) %>% 
+  select(c(clusterID, UCI)) %>%
+  arrange(clusterID) %>%
+  group_by(clusterID) %>% 
+  mutate(cluster_size = n()) %>%
+  ungroup() %>%
+  filter(cluster_size > 2)
+
+predictors_df <- predictors_df %>%
+  mutate(clustered_2022 =  ifelse(dead_or_notDX, NA, ifelse(UCI %in% cluster_df$UCI, 1, 0)))
+
+```
+
+```{r}
+#calculate zip code level predictors and save
+
+# f = function(x) tibble(total=sum(x,na.rm = T), percent=(sum(x, na.rm = TRUE)/sum(!is.na(x))))
+# unpackross = function(...) {
+#     out = across(...)
+#     tidyr::unpack(out, names(out), names_sep = "_")
+# }
+total <- function(x){ sum(x, na.rm = TRUE) }
+percent <- function(x){(sum(x, na.rm = TRUE)/sum(!is.na(x)))}
+
+# df = tibble(x=1:5, p1=x*2, p2=x*4, p3=x*5)
+# r2 = df %>% 
+#     mutate(unpackross(starts_with("p"), f, .names="{.col}_{.fn}"))
+# r2
+
+predictors_df_zip <- predictors_df %>%
+  group_by(rsd_zip_cd) %>%
+  summarise(across(c(Sequence_30day_diagnosis,In_care_2022,In_care_2022_restrict,VL_supp_2022,VL_supp_2022_restrict,clustered_2022),.fns = list(total = total,percent = percent), .names="{.fn}_{.col}"))
+
+predictors_df_clark <- predictors_df %>% select(-c(`Diagnosis year`,death_year,rsd_zip_cd,dead_or_notDX))
+predictors_df_zip_clark <- predictors_df_zip
+
+write.csv(predictors_df %>% select(-c(`Diagnosis year`,death_year,rsd_zip_cd,dead_or_notDX)), file = "clark_indiv_predictors.csv", row.names = FALSE)
+write.csv(predictors_df_zip, file = "clark_county_by_zip.csv", row.names = FALSE)
+
+
+
+save(predictors_df_clark, file = "clark_indiv_predictors.Rdata")
+save(predictors_df_zip_clark, file = "clark_county_by_zip.Rdata")
+```
+
