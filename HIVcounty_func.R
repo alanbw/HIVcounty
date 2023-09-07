@@ -1,25 +1,65 @@
+pad.zip <-  function(x){str_pad(x,side = 'left',pad = '0',width = 5)}
+
+pvalFormat <- function(p.values, method = 'none', replace = FALSE, math = TRUE,empty.cell.value = '-'){
+  ## Formats p-values for reports, can report adjusted pvalues
+  ##    Inputs:
+  ##       - p.value: numeric p-value
+  ##       - method: pvalue adjustment, passed to p.adjust.methods
+  ##       - replace: if TRUE, replaces p-values with their adjusted value
+  ##    Outputs:
+  ##       - out: formatted p-value
+  
+  p.values <- suppressWarnings(as.numeric(p.values))
+  out      <- rep(NA, length(p.values))
+  sig      <- p.adjust(p.values, method)
+  if(replace) p.values <- sig
+  
+  for(i in 1:length(p.values)){
+    if(is.na(p.values[i])){out[i] <- NA}else{
+      if(p.values[i] >= .001){
+        out[i] <- formatC(p.values[i], format = 'f', digits = 3)
+      }
+      
+      if(p.values[i] < .001){
+        out[i] <- '< .001'
+      }
+      
+      if(sig[i] > 0.01 & sig[i] <= 0.05){
+        out[i] <- paste(out[i], '*', sep = '')
+      }
+      
+      if(sig[i] > 0.001 & sig[i] <= 0.01) {
+        out[i] <- paste(out[i], '**', sep = '')
+      }
+      
+      if(sig[i] <= 0.001){
+        out[i] <- paste(out[i], '***', sep = '')
+      }}
+  }
+  
+  out[is.na(out)] <- empty.cell.value
+  return(out)
+}
 
 read_county_data <- function(directory_loc,
                              county_demo_file_subloc,
                              county_zip_file_subloc,
-                             county_zip_list,
-                             county_vl_file_subloc
+                             county_zip_list
                              ) {
   
   county_demo.df = read_csv(paste(directory_loc, county_demo_file_subloc, sep="")) %>% 
-    mutate(across(where(is.character), toupper))
+    mutate(across(where(is.character), toupper)) %>%
+    mutate(across(.cols = c(rsd_zip_cd,cur_zip_cd), pad.zip))
   
   county_zip.df = read_csv(paste(directory_loc, county_zip_file_subloc, sep="")) %>% 
-    mutate(across(where(is.character), toupper))
+    mutate(across(where(is.character), toupper)) %>%
+    mutate(across(.cols = c(rsd_zip_cd), pad.zip))
   
-  county_vl.df = read_csv(paste(directory_loc, county_vl_file_subloc, sep="")) %>% 
-    mutate(across(where(is.character), toupper))
   
   county.df = left_join(county_demo.df, county_zip.df,
-                                  by = c( "rsd_zip_cd" = "zipcode"))
+                                  by = c( "rsd_zip_cd" = "rsd_zip_cd"))
   
-  county.df = left_join(county.df, county_vl.df,
-                                  by = c("UCI"))
+
   #Filter not diagnosed in county
   
 
@@ -42,6 +82,7 @@ univariate_reg <- function(county.df,
   uni_reg_res.df = tibble(
     variable = NULL,
     estimate_uni = NULL,
+    se_uni = NULL,
     p_val_uni = NULL
   )
   
@@ -57,13 +98,17 @@ univariate_reg <- function(county.df,
     uni_reg_res_TEMP.df = tibble(
       variable = reg_variable_ind,
       estimate_uni = uni_reg_sum$coefficients[2,c(1)],
+      se_uni = uni_reg_sum$coefficients[2,c(2)],
       p_val_uni = uni_reg_sum$coefficients[2,c(4)]
     )
     
     uni_reg_res.df = bind_rows(uni_reg_res.df, uni_reg_res_TEMP.df)
   }
   
-  return(uni_reg_res.df)
+  
+  return(list(model = uni_reg,
+              model.summary = uni_reg_sum,
+              summary.table = uni_reg_res.df))
 }
 
 Lasso_tune_lambda <- function(county.df,
@@ -85,6 +130,8 @@ Lasso_tune_lambda <- function(county.df,
   N<-nrow(county.df_TEMP)
   ind<-sample(N,N)
   lambda <- seq(500,0,by=-5)
+  #used for QC to shorten run time
+  # lambda <- seq(500,0,by=-100)
   
   family <- binomial(link = logit)
   
@@ -122,7 +169,7 @@ Lasso_tune_lambda <- function(county.df,
       glm2 <- try(glmmLasso(fix = regression_formula,
                             rnd = list(random_effect_var_fac=~1),
                             family = binomial(link = logit), 
-                            data =county.df_TEMP,
+                            data =county.train,
                             lambda=lambda[j],
                             switch.NR=FALSE,
                             final.re=FALSE,
@@ -175,10 +222,13 @@ Lasso_reg <- function(county.df,
   multi_reg_res.df = tibble(
     variable = rownames(multi_reg_sum$coefficients)[c(2:nrow(multi_reg_sum$coefficients))],
     estimate_multi = multi_reg_sum$coefficients[2:nrow(multi_reg_sum$coefficients),c(1)],
+    se_multi = multi_reg_sum$coefficients[2:nrow(multi_reg_sum$coefficients),c(2)],
     p_val_multi = multi_reg_sum$coefficients[2:nrow(multi_reg_sum$coefficients),c(4)]
   )
   
-  return(multi_reg_res.df)
+  return(return(list(model = glm2_final,
+                     model.summary = multi_reg_sum,
+                     summary.table = multi_reg_res.df)))
 }
 
 geo_map <- function(county.df,

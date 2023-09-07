@@ -1,3 +1,4 @@
+options(tigris_use_cache = TRUE)
 
 library('MASS')
 library('tidyverse')
@@ -17,18 +18,20 @@ library('glmmLasso')
 library('nlme')
 library('mapview')
 library('tidycensus')
+data("zip_code_db")
+source("HIVcounty_func.R")
 
-source("/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/HIVcounty/HIVcounty_func.R")
+directory_loc = "~/Documents/Projects/Nevada/HIVcounty/"
+result_file_loc = paste(directory_loc,'Results',sep = '/')
 
-directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/"
-result_file_loc = "/Users/ravigoyal/Dropbox/County HRSA Grant/TRIUMPH_papers/Care_continuum_analysis_Clark/Results/"
-
-county_demo_file_subloc = "Clark_County_data/clark_county_demographics.csv"
-county_zip_file_subloc = "Clark_County_data/clark_county_by_zip.csv"
-county_vl_file_subloc = "Clark_County_data/clark_viral_suppression_by_year.csv"
-county_test_file_subloc = "Clark_County_data/2023 SNHD testing sites.xlsx"
+county_demo_file_subloc = "clark_county_demographics.csv"
+county_zip_file_subloc =  "clark_county_by_zip.csv"
+# county_test_file_subloc = "Clark_County_data/2023 SNHD testing sites.xlsx"
+county_test_file_subloc = "2023 SNHD testing sites.xlsx"
 
 county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
+
+
 
 #county_demo_file_subloc = "San_Diego_data/sd_county_demographics.csv"
 #county_zip_file_subloc = "San_Diego_data/sd_county_by_zip.csv"
@@ -45,8 +48,7 @@ testing_site_bool = TRUE
 county.df  = read_county_data(directory_loc = directory_loc,
                               county_demo_file_subloc = county_demo_file_subloc,
                               county_zip_file_subloc = county_zip_file_subloc,
-                              county_zip_list = county_zip_list,
-                              county_vl_file_subloc = county_vl_file_subloc
+                              county_zip_list = county_zip_list
 ) 
 
 #Population - B01003_001 Estimate!!Total TOTAL POPULATION
@@ -73,7 +75,7 @@ zipcode.df <- get_acs(geography = "zcta",
 
 zipcode_wide.df = zipcode.df %>%
   select(GEOID, variable, estimate) %>%
-  mutate(GEOID = as.numeric(GEOID)) %>%
+  # mutate(GEOID = as.numeric(GEOID)) %>%
   pivot_wider(names_from = variable,
               values_from = estimate) %>%
   rename(zc_population = B01003_001,
@@ -96,17 +98,20 @@ county.df = county.df %>%
     `Disease Category` == "HIV ONLY (HIV, STAGE 1 OR 2)" ~ 0,
     `Disease Category` == "HIV AND AIDS SIMULTANEOUSLY (HIV, STAGE 3)" ~ 1,
     `Disease Category` == "HIV AND LATER AIDS (HIV, STAGE 3)" ~ 1,
-    TRUE ~ NA_real_))
+    TRUE ~ NA_real_),
+    outcome_diagnosis_factor = factor(outcome_diagnosis,levels = c(0,1), labels = c('Early Stage','Late Stage')))
 
 county.df = county.df %>%
-  mutate(outcome_care = as.numeric(`2022` %in% c(0,1))) 
+  mutate(outcome_care = In_care_2022,
+         outcome_care_factor = factor(outcome_care,levels = c(0,1), labels = c('Not in-care','In-care'))) 
 
 county.df = county.df %>%
-  mutate(outcome_TEMP = `2022`) %>%
+  mutate(outcome_TEMP = VL_supp_2022) %>%
   mutate(outcome_vl_supp = case_when(
     outcome_TEMP == 0 ~ 0,
     outcome_TEMP == 1 ~ 1,
-    TRUE ~ 0))
+    TRUE ~ 0),
+    outcome_vl_supp_factor = factor(outcome_vl_supp,levels = c(0,1), labels = c('Unsuppressed','Suppressed')))
 
 ################
 ## Predictors
@@ -200,7 +205,8 @@ if (testing_site_bool) {
   county_testing_site.df = read_excel(paste(directory_loc, county_test_file_subloc, sep="")) %>%
     rename(zip_code = `Site zip code`) %>%
     mutate(across(where(is.character), toupper)) %>%
-    mutate(testing_site_bin = 1) %>%
+    mutate(zip_code = pad.zip(zip_code),
+           testing_site_bin = 1) %>%
     select(zip_code, testing_site_bin) 
   
   county.df = county.df %>% left_join(county_testing_site.df,
@@ -217,10 +223,9 @@ if (testing_site_bool) {
 
 county.tbl1 = county.df %>% 
   select(Race.factor, `Birth Sex.factor`, `Exposure Category`, Education,
-         clustered_2022,
-         outcome_diagnosis, outcome_care, outcome_vl_supp) %>% # keep only columns of interest
+         clustered_2022,Sequence_ever) %>% # keep only columns of interest
   tbl_summary(     
-    #by = outcome,                                               # stratify entire table by outcome
+    # by = outcome,                                               # stratify entire table by outcome
     statistic = list(all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
                      all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
     digits = all_continuous() ~ 1,                              # rounding for continuous columns
@@ -230,14 +235,80 @@ county.tbl1 = county.df %>%
       `Birth Sex.factor` ~ "Sex",
       `Exposure Category` ~ "Transmission Risk",
       Education ~ "Education",
-      clustered_2022 ~ "Genetic cluster",
-      outcome_diagnosis  ~ "Late-stage Diagnosis",
-      outcome_care  ~ "In Care",
-      outcome_vl_supp  ~ "Viral Suppression"),
+      Sequence_ever ~ 'Sequence available',
+      clustered_2022 ~ "Genetic cluster"),
     missing_text = "Missing"                                    # how missing values should display
   )
 
 write_csv(county.tbl1 %>% as.data.frame(), paste0(result_file_loc, "county_tbl1.csv", sep = ""))
+
+outcomes.factor <- c('outcome_diagnosis_factor', 'outcome_care_factor', 'outcome_vl_supp_factor')
+outcomes.factor.list <- as.list(outcomes.factor)
+names(outcomes.factor.list) <- outcomes.factor
+
+outcome <- outcomes.factor.list[[1]]
+
+list.tab1s <- lapply(outcomes.factor.list,FUN = function(outcome){
+  county.tbl1.split = county.df %>% 
+    select(Race.factor, `Birth Sex.factor`, `Exposure Category`, Education,
+           clustered_2022,Sequence_ever,
+           !!outcome) %>% # keep only columns of interest
+    tbl_summary(     
+      by = !!outcome,                                               # stratify entire table by outcome
+      statistic = list(all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
+                       all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
+      digits = all_continuous() ~ 1,                              # rounding for continuous columns
+      type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
+      label  = list(                                              # display labels for column names
+        Race.factor   ~ "Race",                           
+        `Birth Sex.factor` ~ "Sex",
+        `Exposure Category` ~ "Transmission Risk",
+        Education ~ "Education",
+        Sequence_ever ~ 'Sequence available',
+        clustered_2022 ~ "Genetic cluster"),
+        # outcome_diagnosis  ~ "Late-stage Diagnosis",
+        # outcome_care  ~ "In Care",
+        # outcome_vl_supp  ~ "Viral Suppression"),
+      missing_text = "Missing"                                    # how missing values should display
+    )
+  write_csv(county.tbl1.split %>% as.data.frame(), paste0(result_file_loc, "county_tbl1_",outcome,".csv", sep = ""))
+  return(county.tbl1.split %>% as.data.frame())
+})
+
+county.tbl1.full <- bind_cols(bind_cols(list.tab1s),county.tbl1 %>% as.data.frame()) %>%
+  select(-c("**Characteristic**...4" ,"**Characteristic**...7","**Characteristic**...10" ))
+
+write_csv(county.tbl1.full %>% as.data.frame(), paste0(result_file_loc, "county_tbl1_full.csv", sep = ""))
+
+#can create pseudo dataset and use table strata to create one table as well
+# tbl_strata_ex1 <- county.df %>% 
+#   select(Race.factor, `Birth Sex.factor`, `Exposure Category`, Education,
+#          clustered_2022,Sequence_ever,
+#          outcome_diagnosis_factor,outcome_care_factor) %>% # keep only columns of interest
+#   tbl_strata(
+#     strata = c(outcome_diagnosis_factor,outcome_care_factor),
+#     .tbl_fun =
+#       ~ .x %>%
+#       tbl_summary(     
+#         # by = !!outcome,                                               # stratify entire table by outcome
+#         statistic = list(all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
+#                          all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
+#         digits = all_continuous() ~ 1,                              # rounding for continuous columns
+#         type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
+#         label  = list(                                              # display labels for column names
+#           Race.factor   ~ "Race",                           
+#           `Birth Sex.factor` ~ "Sex",
+#           `Exposure Category` ~ "Transmission Risk",
+#           Education ~ "Education",
+#           Sequence_ever ~ 'Sequence available',
+#           clustered_2022 ~ "Genetic cluster"),
+#         missing_text = "Missing") %>%
+#       add_n(),
+#     .header = "**{strata}**, N = {n}"
+#     # .header = "**{strata}**"
+#   )
+
+
 
 ################
 ## Outcome descriptive tables
@@ -249,52 +320,80 @@ write_csv(county.tbl1 %>% as.data.frame(), paste0(result_file_loc, "county_tbl1.
 ################
 
 outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
-random_effect_var_list = c("cur_zip_cd", "rsd_zip_cd", "rsd_zip_cd")
+random_effect_var_list = c("rsd_zip_cd", "rsd_zip_cd", "rsd_zip_cd")
 
-for (i in c(1:length(outcome_var_list))) {
-  
-  outcome_var_i = outcome_var_list[i]
+outcome_var_list <- list("diagnosis" = list(outcome = 'outcome_diagnosis',
+                              random = 'rsd_zip_cd'),
+                         'care' = list(outcome = 'outcome_care',
+                              random = 'rsd_zip_cd'),
+                         'supp' = list(outcome = 'outcome_vl_supp',
+                                       random = 'rsd_zip_cd'))
+
+var_list <- outcome_var_list[[1]]
+regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
+
+  outcome_var_i = var_list$outcome
+  print(outcome_var_i)
   
   desc_res.df = county.df %>%
     select(all_of(reg_variable.vec), !! outcome_var_i) %>%
+<<<<<<< HEAD
     tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
+=======
+    tbl_summary(by = !!outcome_var_i) %>% as_tibble() %>%
+>>>>>>> b64aadfcbb52d531fdbf459c8e6b5a33a8da0476
     rename(variable = `**Characteristic**`)
   
+  print('univariate')
   uni_reg_res.df = univariate_reg(county.df = county.df,
                                   predictors = reg_variable.vec,
-                                  outcome_var = outcome_var_list[i],
-                                  random_effect_var = random_effect_var_list[i])
-  
+                                  outcome_var = var_list$outcome,
+                                  random_effect_var = var_list$random)
+  print('lasso tune')
   lambda_tune = Lasso_tune_lambda(county.df = county.df,
                                   predictors = reg_variable.vec,
-                                  outcome_var = outcome_var_list[i],
-                                  random_effect_var = random_effect_var_list[i])
-  
+                                  outcome_var = var_list$outcome,
+                                  random_effect_var = var_list$random)
+  print('lasso reg')
   multi_reg_res.df = Lasso_reg(county.df = county.df,
                                predictors = reg_variable.vec,
-                               outcome_var = outcome_var_list[i],
-                               random_effect_var = random_effect_var_list[i],
-                               lambda_tune = lambda_tune) 
+                               outcome_var = var_list$outcome,
+                               random_effect_var = var_list$random,
+                               lambda_tune = lambda_tune)
   
-  reg_res.df = full_join(uni_reg_res.df, multi_reg_res.df, by = "variable")
+  reg_res.df = full_join(uni_reg_res.df$summary.table, multi_reg_res.df$summary.table, by = "variable")
   
   outcome_res.df = left_join(desc_res.df, reg_res.df, by = "variable")
+  outcome_res.df.round <- outcome_res.df %>%
+    mutate(across(.cols = c(estimate_uni, estimate_multi),.fns = function(x){round(x,digits = 2)})) %>%
+    mutate(across(.cols = c(p_val_uni,p_val_multi ),.fns = function(x){pvalFormat(x,empty.cell.value = '-')}))
   
   write_csv(outcome_res.df, paste0(result_file_loc, outcome_var_i, "_all_tbl.csv", sep = ""))
-}
+  write_csv(outcome_res.df.round, paste0(result_file_loc, outcome_var_i, "_all_tbl_rounded.csv", sep = ""))
+  
+  return(list(univariate = uni_reg_res.df,
+              lambda_tune = lambda_tune,
+              multi_reg_res.df = multi_reg_res.df,
+              reg_res.df = reg_res.df,
+              outcome_res.df = outcome_res.df,
+              outcome_res.df.round = outcome_res.df.round))
+})
+
 
 ################
 ## Geographic maps
 ################
 
 outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
-random_effect_var_list = c("cur_zip_cd", "rsd_zip_cd", "rsd_zip_cd")
+outcome_var_list_nice = c("Proportion Late stage dx", "Proportion in-care", "Proportion VL Suppression")
+random_effect_var_list = c("rsd_zip_cd", "rsd_zip_cd", "rsd_zip_cd")
 
 for (i in c(1:length(outcome_var_list))) {
   
   outcome_var_i = outcome_var_list[i]
   
-  HIV_geomap = geo_map(county.df = county.df,
+  HIV_geomap = geo_map(title_a = outcome_var_list_nice[i],
+                       county.df = county.df,
                        county_zip_list = county_zip_list,
                        outcome_var = outcome_var_list[i],
                        geo_zip_var = random_effect_var_list[i],
