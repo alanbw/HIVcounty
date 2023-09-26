@@ -51,15 +51,16 @@ read_county_data <- function(directory_loc,
     mutate(across(where(is.character), toupper)) %>%
     mutate(across(.cols = c(rsd_zip_cd,cur_zip_cd), pad.zip))
   
-  county_zip.df = read_csv(paste(directory_loc, county_zip_file_subloc, sep="")) %>% 
+  county_zip.df = read_csv(paste(directory_loc, county_zip_file_subloc, sep="")) %>%
     mutate(across(where(is.character), toupper)) %>%
     mutate(across(.cols = c(rsd_zip_cd), pad.zip))
-  
+
   
   county.df = left_join(county_demo.df, county_zip.df,
                                   by = c( "rsd_zip_cd" = "rsd_zip_cd"))
   
-
+  #county.df  = county_demo.df
+  
   #Filter not diagnosed in county
   
 

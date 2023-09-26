@@ -21,12 +21,12 @@ library('tidycensus')
 data("zip_code_db")
 source("HIVcounty_func.R")
 
-directory_loc = "~/Documents/Projects/Nevada/HIVcounty/"
+directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/"
 result_file_loc = paste(directory_loc,'Results',sep = '/')
 
 county_demo_file_subloc = "clark_county_demographics.csv"
 county_zip_file_subloc =  "clark_county_by_zip.csv"
-# county_test_file_subloc = "Clark_County_data/2023 SNHD testing sites.xlsx"
+#county_test_file_subloc = "Clark_County_data/2023 SNHD testing sites.xlsx"
 county_test_file_subloc = "2023 SNHD testing sites.xlsx"
 
 county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
@@ -185,7 +185,7 @@ reg_variable_ind.vec = c(
   "clustered_2022")
 
 reg_variable_zip.vec = c(
-  "percent_clustered_2022",
+  #"percent_clustered_2022",
   "zc_income",
   "predictor_zc_per_poverty",
   "predictor_zc_per_hispanic",
@@ -320,14 +320,14 @@ write_csv(county.tbl1.full %>% as.data.frame(), paste0(result_file_loc, "county_
 ################
 
 outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
-random_effect_var_list = c("rsd_zip_cd", "rsd_zip_cd", "rsd_zip_cd")
+random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
 
 outcome_var_list <- list("diagnosis" = list(outcome = 'outcome_diagnosis',
                               random = 'rsd_zip_cd'),
                          'care' = list(outcome = 'outcome_care',
-                              random = 'rsd_zip_cd'),
+                              random = 'cur_zip_cd'),
                          'supp' = list(outcome = 'outcome_vl_supp',
-                                       random = 'rsd_zip_cd'))
+                                       random = 'cur_zip_cd'))
 
 var_list <- outcome_var_list[[1]]
 regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
@@ -337,11 +337,7 @@ regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
   
   desc_res.df = county.df %>%
     select(all_of(reg_variable.vec), !! outcome_var_i) %>%
-<<<<<<< HEAD
     tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
-=======
-    tbl_summary(by = !!outcome_var_i) %>% as_tibble() %>%
->>>>>>> b64aadfcbb52d531fdbf459c8e6b5a33a8da0476
     rename(variable = `**Characteristic**`)
   
   print('univariate')
@@ -386,7 +382,7 @@ regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
 
 outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
 outcome_var_list_nice = c("Proportion Late stage dx", "Proportion in-care", "Proportion VL Suppression")
-random_effect_var_list = c("rsd_zip_cd", "rsd_zip_cd", "rsd_zip_cd")
+random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
 
 for (i in c(1:length(outcome_var_list))) {
   
@@ -396,8 +392,7 @@ for (i in c(1:length(outcome_var_list))) {
                        county.df = county.df,
                        county_zip_list = county_zip_list,
                        outcome_var = outcome_var_list[i],
-                       geo_zip_var = random_effect_var_list[i],
-                       title_a = outcome_var_list[i]) 
+                       geo_zip_var = random_effect_var_list[i]) 
   
   mapshot(HIV_geomap, file = paste0(result_file_loc, outcome_var_i, "_map.png", sep = ""))
   
