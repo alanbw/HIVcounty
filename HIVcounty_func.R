@@ -43,8 +43,8 @@ pvalFormat <- function(p.values, method = 'none', replace = FALSE, math = TRUE,e
 
 read_county_data <- function(directory_loc,
                              county_demo_file_subloc,
-                             county_zip_file_subloc,
-                             county_zip_list
+                             county_zip_file_subloc
+                             # county_zip_list
                              ) {
   
   county_demo.df = read_csv(paste(directory_loc, county_demo_file_subloc, sep="")) %>% 
@@ -65,8 +65,9 @@ read_county_data <- function(directory_loc,
   
 
   county.df  = county.df %>% 
-    filter(rsd_zip_cd %in% county_zip_list) %>%
-    filter(cur_zip_cd %in% county_zip_list)
+    filter(local_residency_dx %in% 1, local_residency_cur %in% 1)
+    # filter(rsd_zip_cd %in% county_zip_list) %>%
+    # filter(cur_zip_cd %in% county_zip_list)
   
   county.df = county.df %>% 
     filter(`Diagnosis year` <= 2022) %>%

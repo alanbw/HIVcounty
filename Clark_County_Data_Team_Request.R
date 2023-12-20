@@ -265,8 +265,13 @@ date_cols <- c("vl_first_dt", "vl_recent_dt", "cd4_first_dt", "cd4_recent_dt",
 
 
 # Load Clark County PLWH data; overwrites non-altered SD variables
-load(paste("/Users/ravigoyal/Library/CloudStorage/OneDrive-SharedLibraries-UniversityofCalifornia,SanDiegoHealth/",
-           "TrIUMPH - Clark County - Clark County/Data/Current_Data/Nevada_eHARS_alltables_073123.Rdata", sep = ""))
+# load(paste("/Users/ravigoyal/Library/CloudStorage/OneDrive-SharedLibraries-UniversityofCalifornia,SanDiegoHealth/",
+#            "TrIUMPH - Clark County - Clark County/Data/Current_Data/Nevada_eHARS_alltables_073123.Rdata", sep = ""))
+onedrive_path <- readLines("OneDrivePath.txt")
+cur_data_path <- paste0(onedrive_path, "Current_Data/")
+# Read in the data:
+load(paste(cur_data_path, "Nevada_eHARS_alltables_073123.Rdata", sep = ""))
+
 # Attach County information
 demographics_clark <- demographics %>%
   mutate(
@@ -427,8 +432,10 @@ demo_clark_out <- demographics_clark %>%
 
 # save(clark_all_vars_by_zip, sd_all_vars_by_zip, demo_clark_out, demo_sd_out,
 #      file = "Census_and_PLWH_summaries.RData")
-write.csv(predictors_df_zip_clark, file = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/clark_county_by_zip.csv", row.names = FALSE)
+# write.csv(predictors_df_zip_clark, file = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/clark_county_by_zip.csv", row.names = FALSE)
+write.csv(predictors_df_zip_clark, file = "clark_county_by_zip.csv", row.names = FALSE)
 # write.csv(sd_all_vars_by_zip, file = "sd_county_by_zip.csv", row.names = FALSE)
-write.csv(demo_clark_out, file = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/clark_county_demographics.csv", row.names = FALSE)
+# write.csv(demo_clark_out, file = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/clark_county_demographics.csv", row.names = FALSE)
+write.csv(demo_clark_out, file = "clark_county_demographics.csv", row.names = FALSE)
 # write.csv(demo_sd_out, file = "sd_county_demographics.csv", row.names = FALSE)
 #################### END SUMMARISE AND SAVE DATA ##########
