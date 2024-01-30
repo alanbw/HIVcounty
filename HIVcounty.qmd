@@ -1,10 +1,11 @@
 ---
 title: "Clark County Continuum of Care analysis"
 number-sections: true
-toc: true
+# toc: true
 toc-depth: 4
 format: 
   html:
+    page-layout: full
     self-contained: true
 editor_options: 
   chunk_output_type: console
@@ -55,6 +56,13 @@ We create an analytic dataset that includes individual and zip code level covari
 #| label: analytic-dataset
 #| echo: false
 #| include: false
+
+# load in alltables
+#use output till we update alltables file in Current Data
+# onedrive_path <- readLines(here("OneDrivePath.txt"))
+# # load(paste0(onedrive_path, "Current_Data/UCSD_eHARS_alltables_052023.Rdata"))))
+#use output till we update alltables file in Current Data
+load("~/Documents/Projects/Nevada/data requests/NV_Data_Processing_Scripts/output/Nevada_eHARS_alltables_073123.Rdata")
 
 # directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/"
 directory_loc = paste0(here(),'/')
@@ -119,11 +127,24 @@ county.df  = read_county_data(directory_loc = directory_loc,
 
 #Population - B01003_001 Estimate!!Total TOTAL POPULATION
 #HISPANIC - B03001_003 Estimate!!Total:!!Hispanic or Latino: HISPANIC OR LATINO ORIGIN BY SPECIFIC ORIGIN tract
-#EDUCATION - B16010_015 Estimate!!Total:!!High school graduate (includes equivalency): EDUCATIONAL ATTAINMENT AND EMPLOYMENT STATUS BY LANGUAGE SPOKEN AT HOME FOR THE POPULATION 25 YEARS AND OVER
+#EDUCATION - Sum of the following
+#maybe use this as the total
+# B16010_001 Estimate!!Total:EDUCATIONAL ATTAINMENT AND EMPLOYMENT STATUS BY LANGUAGE SPOKEN AT HOME FOR THE POPULATION 25 YEARS AND OVER
+# EDUCATIONAL ATTAINMENT AND EMPLOYMENT STATUS BY LANGUAGE SPOKEN AT HOME FOR THE POPULATION 25 YEARS AND OVER
+# B16010_015 Estimate!!Total:!!High school graduate (includes equivalency): EDUCATIONAL ATTAINMENT AND EMPLOYMENT STATUS BY LANGUAGE SPOKEN AT HOME FOR THE POPULATION 25 YEARS AND OVER
+# B16010_028 Estimate!!Total:!!Some college or associate's degree:EDUCATIONAL ATTAINMENT AND EMPLOYMENT STATUS BY LANGUAGE SPOKEN AT HOME FOR THE POPULATION 25 YEARS AND OVER
+# B16010_041 Estimate!!Total:!!Bachelor's degree or higher: EDUCATIONAL ATTAINMENT AND EMPLOYMENT STATUS BY LANGUAGE SPOKEN AT HOME FOR THE POPULATION 25 YEARS AND OVER
+
 #RACE - B02001_002 Estimate!!Total:!!White alone RACE
 #POVERY - B17001_002 Estimate!!Total:!!Income in the past 12 months below poverty level: POVERTY STATUS IN THE PAST 12 MONTHS BY SEX BY AGE
+# B17001_001 Estimate!!Total:POVERTY STATUS IN THE PAST 12 MONTHS BY SEX BY AGE
 #INCOME - B08121_001 Estimate!!Median earnings in the past 12 months --!!Total:MEDIAN EARNINGS IN THE PAST 12 MONTHS (IN 2021 
-#Employment - B23025_002 Estimate!!Total:!!In labor force: EMPLOYMENT STATUS FOR THE POPULATION 16 YEARS AND OVER
+#Employment - 
+#probably should not use, total in labor force, includes armed forces and those that are unemployed
+# B23025_002 Estimate!!Total:!!In labor force: EMPLOYMENT STATUS FOR THE POPULATION 16 YEARS AND OVER
+# B23025_003 Estimate!!Total:!!In labor force:!!Civilian labor force: EMPLOYMENT STATUS FOR THE POPULATION 16 YEARS AND OVER
+# B23025_004 Estimate!!Total:!!In labor force:!!Civilian labor force:!!Employed EMPLOYMENT STATUS FOR THE POPULATION 16 YEARS AND OVER
+# B23025_001 Estimate!!Total:EMPLOYMENT STATUS FOR THE POPULATION 16 YEARS AND OVER
 
 # x = load_variables(2021, "acs5", cache = TRUE)
 # x %>% View()
@@ -131,11 +152,16 @@ county.df  = read_county_data(directory_loc = directory_loc,
 zipcode.df <- get_acs(geography = "zcta",
                       variables = c("B01003_001",
                                     "B03001_003",
+                                    "B16010_001",
                                     "B16010_015",
+                                    "B16010_028",
+                                    "B16010_042",
                                     "B02001_002",
+                                    "B17001_001",
                                     "B17001_002",
                                     "B08121_001",
-                                    "B23025_002"),
+                                    "B23025_003",
+                                    'B23025_004'),
                       year = 2021,
                       zcta = county_zip_list) 
 
@@ -146,11 +172,18 @@ zipcode_wide.df = zipcode.df %>%
               values_from = estimate) %>%
   rename(zc_population = B01003_001,
          zc_hispanic = B03001_003, 
-         zc_education = B16010_015, 
+         zc_education_total = B16010_001,
+         zc_education_high_school = B16010_015, 
+         zc_education_some_college = B16010_028, 
+         zc_education_bach_plus = B16010_042, 
          zc_white = B02001_002,
          zc_poverty = B17001_002,
+         zc_poverty_total = B17001_001,
          zc_income = B08121_001,
-         zc_employment = B23025_002)
+         zc_employment = B23025_004,
+         zc_employment_total = B23025_003) %>%
+  mutate(zc_education = zc_education_some_college + zc_education_bach_plus+zc_education_high_school,
+         zc_income = zc_income/1000)
 
 county.df = left_join(county.df, zipcode_wide.df,
                       by = c( "rsd_zip_cd" = "GEOID"))
@@ -159,7 +192,6 @@ county.df = left_join(county.df, zipcode_wide.df,
 ```
 
 
-Number of individuals after filtering to diagnosed in county: `r county.df %>% nrow()`
 
 # Research question
 
@@ -223,22 +255,27 @@ VS
 county.df = county.df %>%
   mutate(outcome_diagnosis = case_when(
     `Disease Category` == "HIV ONLY (HIV, STAGE 1 OR 2)" ~ 0,
+    `Disease Category` == "HIV AND LATER AIDS (HIV, STAGE 3)" ~ 0,
     `Disease Category` == "HIV AND AIDS SIMULTANEOUSLY (HIV, STAGE 3)" ~ 1,
-    `Disease Category` == "HIV AND LATER AIDS (HIV, STAGE 3)" ~ 1,
     TRUE ~ NA_real_),
     outcome_diagnosis_factor = factor(outcome_diagnosis,levels = c(0,1), labels = c('Early Stage','Late Stage')))
 
 county.df = county.df %>%
-  mutate(outcome_care = In_care_2022,
+  mutate(outcome_care = In_care_2022_COC,
          outcome_care_factor = factor(outcome_care,levels = c(0,1), labels = c('Not in-care','In-care'))) 
 
 county.df = county.df %>%
-  mutate(outcome_TEMP = VL_supp_2022) %>%
+  mutate(outcome_TEMP = VL_supp_2022_COC) %>%
   mutate(outcome_vl_supp = case_when(
     outcome_TEMP == 0 ~ 0,
     outcome_TEMP == 1 ~ 1,
     TRUE ~ 0),
     outcome_vl_supp_factor = factor(outcome_vl_supp,levels = c(0,1), labels = c('Unsuppressed','Suppressed')))
+
+#filter out one person with missing outcome for late stage dx
+county.df <- county.df %>%
+  filter(!is.na(outcome_diagnosis) & !is.na(outcome_care) & !is.na(outcome_vl_supp))
+
 
 ```
 
@@ -252,7 +289,7 @@ Individual-level variables to consider:
 *   predictor_hispanic
 *   predictor_idu
 *   predictor_msm
-*   predictor_education
+<!-- *   predictor_education -->
 *   predictor_birth_sex
 *   clustered_2022
 
@@ -330,9 +367,9 @@ county.df = county.df %>%
 county.df = county.df %>%
   mutate(predictor_zc_per_poverty = zc_poverty / zc_population) %>%
   mutate(predictor_zc_per_hispanic = zc_hispanic / zc_population) %>%
-  mutate(predictor_zc_per_education = zc_education / zc_population) %>%
+  mutate(predictor_zc_per_education = zc_education / zc_education_total) %>%
   mutate(predictor_zc_per_race = zc_white / zc_population) %>%
-  mutate(predictor_zc_per_employment = zc_employment / zc_population)
+  mutate(predictor_zc_per_employment = zc_employment / zc_employment_total)
     
 reg_variable_ind.vec = c(
   "predictor_diagnosis_year",
@@ -340,7 +377,8 @@ reg_variable_ind.vec = c(
   "predictor_hispanic",
   "predictor_idu",
   "predictor_msm",
-  "predictor_education",
+  #removing education since there are over 1,000 people with a missing value for education
+  # "predictor_education",
   "predictor_birth_sex",
   "clustered_2022")
 
@@ -386,7 +424,13 @@ if (testing_site_bool) {
   reg_variable.vec = c(reg_variable.vec, "testing_site_bin")
 }
 
+#filter out people with missing zip code level characterics due to values missing from ACS
+county.df = county.df %>%
+  filter(!if_any(.cols = all_of(reg_variable.vec),~ is.na(.)))
+
 ```
+
+Number of individuals after filtering to diagnosed in county: `r county.df %>% nrow()`
 
 # Descriptive statistics
 
@@ -402,19 +446,22 @@ The number of individuals in Stages 1 or 2 (outcome = 0) vs. number of individua
 ################
 
 county.tbl1 = county.df %>% 
-  select(Race.factor, `Birth Sex.factor`, `Exposure Category`, Education,
+  select(Age.diagnosis, predictor_diagnosis_year,Race.factor, `Birth Sex.factor`, `Exposure Category`,
          clustered_2022,Sequence_ever) %>% # keep only columns of interest
   tbl_summary(     
     # by = outcome,                                               # stratify entire table by outcome
-    statistic = list(all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
-                     all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
+    statistic = list(all_continuous() ~ "{mean} ({p0}, {p100})",        # stats and format for continuous columns
+                     all_categorical() ~ "{n} ({p}%)"),   # stats and format for categorical columns
+                     # all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
     digits = all_continuous() ~ 1,                              # rounding for continuous columns
     type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
     label  = list(                                              # display labels for column names
+       Age.diagnosis ~ "Age at diagnosis",
+        predictor_diagnosis_year ~ "Year of diagnosis",
       Race.factor   ~ "Race",                           
       `Birth Sex.factor` ~ "Sex",
       `Exposure Category` ~ "Transmission Risk",
-      Education ~ "Education",
+      # Education ~ "Education",
       Sequence_ever ~ 'Sequence available',
       clustered_2022 ~ "Genetic cluster"),
     missing_text = "Missing"                                    # how missing values should display
@@ -430,32 +477,40 @@ outcome <- outcomes.factor.list[[1]]
 
 list.tab1s <- lapply(outcomes.factor.list,FUN = function(outcome){
   county.tbl1.split = county.df %>% 
-    select(Race.factor, `Birth Sex.factor`, `Exposure Category`, Education,
+    select(Age.diagnosis, predictor_diagnosis_year,Race.factor, `Birth Sex.factor`, `Exposure Category`,
            clustered_2022,Sequence_ever,
            !!outcome) %>% # keep only columns of interest
     tbl_summary(     
       by = !!outcome,                                               # stratify entire table by outcome
-      statistic = list(all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
-                       all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
+      statistic = list(all_continuous() ~ "{mean} ({p0}, {p100})",        # stats and format for continuous columns
+                       all_categorical() ~ "{n} ({p}%)"),   # stats and format for categorical columns
+                       # all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
       digits = all_continuous() ~ 1,                              # rounding for continuous columns
       type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
       label  = list(                                              # display labels for column names
+        Age.diagnosis ~ "Age at diagnosis",
+        predictor_diagnosis_year ~ "Year of diagnosis",
         Race.factor   ~ "Race",                           
         `Birth Sex.factor` ~ "Sex",
         `Exposure Category` ~ "Transmission Risk",
-        Education ~ "Education",
+        # Education ~ "Education",
         Sequence_ever ~ 'Sequence available',
         clustered_2022 ~ "Genetic cluster"),
         # outcome_diagnosis  ~ "Late-stage Diagnosis",
         # outcome_care  ~ "In Care",
         # outcome_vl_supp  ~ "Viral Suppression"),
       missing_text = "Missing"                                    # how missing values should display
-    )
+    ) %>%
+  add_overall()
   write_csv(county.tbl1.split %>% as.data.frame(), paste0(result_file_loc, "county_tbl1_",outcome,".csv", sep = ""))
-  return(county.tbl1.split %>% as.data.frame())
+  return(list(html.table= county.tbl1.split,
+         df.table = county.tbl1.split %>% as.data.frame() %>% select(-contains("Overall"))))
 })
 
-county.tbl1.full <- bind_cols(bind_cols(list.tab1s),county.tbl1 %>% as.data.frame()) %>%
+county.tbl1.full <- bind_cols(bind_cols(list.tab1s$outcome_vl_supp_factor$df.table,
+                                        list.tab1s$outcome_care_factor$df.table,
+                                        list.tab1s$outcome_diagnosis_factor$df.table),
+                              county.tbl1 %>% as.data.frame()) %>%
   select(-c("**Characteristic**...4" ,"**Characteristic**...7","**Characteristic**...10" ))
 
 write_csv(county.tbl1.full %>% as.data.frame(), paste0(result_file_loc, "county_tbl1_full.csv", sep = ""))
@@ -491,10 +546,92 @@ write_csv(county.tbl1.full %>% as.data.frame(), paste0(result_file_loc, "county_
 
 
 ################
-## Outcome descriptive tables
+## zip code descriptive tables
 ################
 
+county.zip.tbl1 = county.df %>% 
+  select(reg_variable_zip.vec) %>% # keep only columns of interest
+  tbl_summary(     
+    # by = outcome,                                               # stratify entire table by outcome
+    statistic = list(#all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
+                     all_continuous() ~ "{mean} ({p0}, {p100}))",        # stats and format for continuous columns
+                     all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
+    digits = all_continuous() ~ 1,                              # rounding for continuous columns
+    type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
+    label  = list(                                              # display labels for column names
+      percent_clustered_2022   ~ "Percent clustered (2022)",                           
+      zc_income ~ "Median income",
+      predictor_zc_per_poverty ~ "Percentage below poverty level",
+      predictor_zc_per_hispanic ~ "Percentage Hispanic",
+      predictor_zc_per_education ~ 'Percentage high school education or higher',
+      predictor_zc_per_race ~ 'Percentage White',
+      predictor_zc_per_employment ~ 'Percentage employed'),
+    missing_text = "Missing"                                    # how missing values should display
+  )
+write_csv(county.zip.tbl1 %>% as.data.frame(), paste0(result_file_loc, "county_tbl1_zip.csv", sep = ""))
+# county.all.tbl1 = county.df %>% 
+#   select(reg_variable.vec) %>% # keep only columns of interest
+#   tbl_summary(     
+#     # by = outcome,                                               # stratify entire table by outcome
+#     statistic = list(all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
+#                      all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
+#     digits = all_continuous() ~ 1,                              # rounding for continuous columns
+#     type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
+#     # label  = list(                                              # display labels for column names
+#     #    Race.factor   ~ "Race",                           
+#     #     `Birth Sex.factor` ~ "Sex",
+#     #     `Exposure Category` ~ "Transmission Risk",
+#     #     # Education ~ "Education",
+#     #     Sequence_ever ~ 'Sequence available',
+#     #     clustered_2022 ~ "Genetic cluster",
+#     #   percent_clustered_2022   ~ "Percent clustered (2022)",                           
+#     #   zc_income ~ "Median income",
+#     #   predictor_zc_per_poverty ~ "Percentage below poverty level",
+#     #   predictor_zc_per_hispanic ~ "Percentage Hispanic",
+#     #   predictor_zc_per_education ~ 'Percentage high school education',
+#     #   predictor_zc_per_race ~ 'Percentage White',
+#     #   predictor_zc_per_employment ~ 'Percentage employed'),
+#     missing_text = "Missing"                                    # how missing values should display
+#   )
+
 ```
+
+```{r}
+#| echo: false
+#| output: true
+#| tbl-cap: Overall population included in analysis
+county.tbl1
+```
+
+## Late stage diagnosis
+
+```{r}
+#| echo: false
+#| output: true
+#| tbl-cap: Late stage diagnosis
+list.tab1s$outcome_diagnosis_factor$html.table
+```
+
+## Virally suppressed
+
+```{r}
+#| echo: false
+#| output: true
+#| tbl-cap: Virally suppressed
+list.tab1s$outcome_vl_supp_factor$html.table
+```
+
+## In-care
+
+```{r}
+#| echo: false
+#| output: true
+#| tbl-cap: In-care
+list.tab1s$outcome_care_factor$html.table
+```
+
+## Zip-code level variables
+
 
 
 # Regression
@@ -507,28 +644,28 @@ write_csv(county.tbl1.full %>% as.data.frame(), paste0(result_file_loc, "county_
 ################
 ## Regression
 ################
-
-outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
-random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
-
-outcome_var_list <- list("diagnosis" = list(outcome = 'outcome_diagnosis',
-                              random = 'rsd_zip_cd'),
-                         'care' = list(outcome = 'outcome_care',
-                              random = 'cur_zip_cd'),
-                         'supp' = list(outcome = 'outcome_vl_supp',
-                                       random = 'cur_zip_cd'))
-
-var_list <- outcome_var_list[[1]]
+# 
+# outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
+# random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
+# 
+# outcome_var_list <- list("diagnosis" = list(outcome = 'outcome_diagnosis',
+#                               random = 'rsd_zip_cd'),
+#                          'care' = list(outcome = 'outcome_care',
+#                               random = 'cur_zip_cd'),
+#                          'supp' = list(outcome = 'outcome_vl_supp',
+#                                        random = 'cur_zip_cd'))
+# 
+# # var_list <- outcome_var_list[[1]]
 # regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
 # 
 #   outcome_var_i = var_list$outcome
 #   print(outcome_var_i)
-#   
+# 
 #   desc_res.df = county.df %>%
 #     select(all_of(reg_variable.vec), !! outcome_var_i) %>%
 #     tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
 #     rename(variable = `**Characteristic**`)
-#   
+# 
 #   print('univariate')
 #   uni_reg_res.df = univariate_reg(county.df = county.df,
 #                                   predictors = reg_variable.vec,
@@ -545,17 +682,17 @@ var_list <- outcome_var_list[[1]]
 #                                outcome_var = var_list$outcome,
 #                                random_effect_var = var_list$random,
 #                                lambda_tune = lambda_tune)
-#   
+# 
 #   reg_res.df = full_join(uni_reg_res.df$summary.table, multi_reg_res.df$summary.table, by = "variable")
-#   
+# 
 #   outcome_res.df = left_join(desc_res.df, reg_res.df, by = "variable")
 #   outcome_res.df.round <- outcome_res.df %>%
 #     mutate(across(.cols = c(estimate_uni, estimate_multi),.fns = function(x){round(x,digits = 2)})) %>%
 #     mutate(across(.cols = c(p_val_uni,p_val_multi ),.fns = function(x){pvalFormat(x,empty.cell.value = '-')}))
-#   
+# 
 #   write_csv(outcome_res.df, paste0(result_file_loc, outcome_var_i, "_all_tbl.csv", sep = ""))
 #   write_csv(outcome_res.df.round, paste0(result_file_loc, outcome_var_i, "_all_tbl_rounded.csv", sep = ""))
-#   
+# 
 #   return(list(univariate = uni_reg_res.df,
 #               lambda_tune = lambda_tune,
 #               multi_reg_res.df = multi_reg_res.df,
@@ -592,6 +729,7 @@ regression.output.list$supp$outcome_res.df.round %>%
 #| echo: false
 #| output: true
 #| tbl-cap: In Care
+#| tbl-colwidths: auto
 regression.output.list$care$outcome_res.df.round %>%
   gt()
 ```
@@ -616,22 +754,122 @@ regression.output.list$diagnosis$outcome_res.df.round %>%
 ################
 ## Geographic maps
 ################
+map_outcome_list <- list(
+  "late stage dx" = list(
+    outcome_var_list = c("outcome_diagnosis"),
+    outcome_var_list_nice = c("Proportion Late stage dx"),
+    random_effect_var_list = c("rsd_zip_cd")
+  ),
+  "in-care" = list(
+    outcome_var_list = c("outcome_care"),
+    outcome_var_list_nice = c("Proportion in-care"),
+    random_effect_var_list = c("cur_zip_cd")
+  ),
+  "supp" = list(
+    outcome_var_list = c("outcome_vl_supp"),
+    outcome_var_list_nice = c("Proportion VL Suppression"),
+    random_effect_var_list = c("cur_zip_cd")
+  )
+)
+
+# outcome <- map_outcome_list[[1]]
+map_plots <- lapply(X = map_outcome_list,FUN = function(outcome){
+  # outcome_var_i = outcome_var_list[i]
+
+  HIV_geomap = geo_map(title_a = outcome$outcome_var_list_nice,
+                       county.df = county.df,
+                       county_zip_list = county_zip_list,
+                       outcome_var = outcome$outcome_var_list,
+                       geo_zip_var = outcome$random_effect_var_list)
+
+  mapshot(HIV_geomap, file = paste0(result_file_loc, outcome$outcome_var_list, "_map.png", sep = ""))
+  return(HIV_geomap)
+})
+```
+
+## Late stage diagnosis
+
+```{r,fig.width=10,fig.height=11}
+#| echo: false
+#| label: late_stage_dx_map
+#| fig-cap: "Heatmap of Late stage diagnosis"
+map_plots$`late stage dx`
+```
+
+## In-care
+
+```{r,fig.width=10,fig.height=11}
+#| echo: false
+#| label: in-care
+#| fig-cap: "Heatmap of proportion in-care in 2022"
+map_plots$`in-care`
+```
+
+## Viral suppression
+
+```{r,fig.width=10,fig.height=11}
+#| echo: false
+#| label: viral-suppression
+#| fig-cap: "Heatmap of proportion virally suppressed in 2022"
+map_plots$supp
+```
+
+# Stage of care
+
+```{r}
+#| label: stage-of-care
+#| echo: false
+#| include: false
+
+load('stage.output.2023.RData')
+
+# load('~/Documents/Projects/Nevada/data requests/NV_Data_Processing_Scripts/NV_stage_of_care_code.R')
+#  ended up calcualting it elsewhere and just loading the results.
+# stage.output.2023 <- stage.care(demographics = demographics,
+#                                 year.stage = 2023,
+#                                 county.stage = 'Clark County',
+#                                 state.stage = 'NV')
 # 
-# outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
-# outcome_var_list_nice = c("Proportion Late stage dx", "Proportion in-care", "Proportion VL Suppression")
-# random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
 # 
-# for (i in c(1:length(outcome_var_list))) {
-#   
-#   outcome_var_i = outcome_var_list[i]
-#   
-#   HIV_geomap = geo_map(title_a = outcome_var_list_nice[i],
-#                        county.df = county.df,
-#                        county_zip_list = county_zip_list,
-#                        outcome_var = outcome_var_list[i],
-#                        geo_zip_var = random_effect_var_list[i]) 
-#   
-#   mapshot(HIV_geomap, file = paste0(result_file_loc, outcome_var_i, "_map.png", sep = ""))
-#   
-# }
+county.df.stage <- left_join(county.df,stage.output.2023,by = c('UCI' = 'UCI'))
+# table(county.df.stage$outcome_vl_supp,county.df.stage$Stage)
+# 
+# table(county.df.stage$outcome_care,county.df.stage$Stage,useNA = 'always')
+
+# county.df.stage.check.vl <- county.df.stage %>%
+#   filter(VL_supp_2022_COC %in% 1 & Stage != 5)
+# 
+# county.df.stage.check.care <- county.df.stage %>%
+#   filter((In_care_2022_COC %in% 0 & Stage %in% c(4,5)) | (In_care_2022_COC %in% 1 & !(Stage %in% c(4,5))))
+
+stage.tbl <- county.df.stage %>% 
+    select(Race.factor, `Birth Sex.factor`, `Exposure Category`,
+           clustered_2022,Sequence_ever,
+           Stage) %>% # keep only columns of interest
+    tbl_summary(     
+      by = Stage,                                               # stratify entire table by outcome
+      statistic = list(all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
+                       all_categorical() ~ "{n} / {N} ({p}%)"),   # stats and format for categorical columns
+      digits = all_continuous() ~ 1,                              # rounding for continuous columns
+      type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
+      label  = list(                                              # display labels for column names
+        Race.factor   ~ "Race",                           
+        `Birth Sex.factor` ~ "Sex",
+        `Exposure Category` ~ "Transmission Risk",
+        # Education ~ "Education",
+        Sequence_ever ~ 'Sequence available',
+        clustered_2022 ~ "Genetic cluster"),
+        # outcome_diagnosis  ~ "Late-stage Diagnosis",
+        # outcome_care  ~ "In Care",
+        # outcome_vl_supp  ~ "Viral Suppression"),
+      missing_text = "Missing"                                    # how missing values should display
+    ) %>%
+  add_overall()
+```
+
+```{r}
+#| echo: false
+#| output: true
+#| tbl-cap: Stage of care at Jan 1. 2023
+stage.tbl
 ```
