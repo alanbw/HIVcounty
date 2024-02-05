@@ -447,7 +447,7 @@ The number of individuals in Stages 1 or 2 (outcome = 0) vs. number of individua
 
 county.tbl1 = county.df %>% 
   select(Age.diagnosis, predictor_diagnosis_year,Race.factor, `Birth Sex.factor`, `Exposure Category`,
-         clustered_2022,Sequence_ever) %>% # keep only columns of interest
+         clustered_2022,Sequence_ever,all_of(reg_variable_zip.vec)) %>% # keep only columns of interest
   tbl_summary(     
     # by = outcome,                                               # stratify entire table by outcome
     statistic = list(all_continuous() ~ "{mean} ({p0}, {p100})",        # stats and format for continuous columns
@@ -463,7 +463,14 @@ county.tbl1 = county.df %>%
       `Exposure Category` ~ "Transmission Risk",
       # Education ~ "Education",
       Sequence_ever ~ 'Sequence available',
-      clustered_2022 ~ "Genetic cluster"),
+      clustered_2022 ~ "Genetic cluster",
+      percent_clustered_2022 ~ "Percentage in cluster",
+        zc_income ~ "Median income",
+       predictor_zc_per_poverty ~ "Percentage below poverty level",
+      predictor_zc_per_hispanic ~ "Percentage Hispanic",
+      predictor_zc_per_education ~ 'Percentage high school education',
+      predictor_zc_per_race ~ 'Percentage White',
+      predictor_zc_per_employment ~ 'Percentage employed'),
     missing_text = "Missing"                                    # how missing values should display
   )
 
@@ -478,7 +485,7 @@ outcome <- outcomes.factor.list[[1]]
 list.tab1s <- lapply(outcomes.factor.list,FUN = function(outcome){
   county.tbl1.split = county.df %>% 
     select(Age.diagnosis, predictor_diagnosis_year,Race.factor, `Birth Sex.factor`, `Exposure Category`,
-           clustered_2022,Sequence_ever,
+           clustered_2022,Sequence_ever,all_of(reg_variable_zip.vec),
            !!outcome) %>% # keep only columns of interest
     tbl_summary(     
       by = !!outcome,                                               # stratify entire table by outcome
@@ -495,7 +502,14 @@ list.tab1s <- lapply(outcomes.factor.list,FUN = function(outcome){
         `Exposure Category` ~ "Transmission Risk",
         # Education ~ "Education",
         Sequence_ever ~ 'Sequence available',
-        clustered_2022 ~ "Genetic cluster"),
+        clustered_2022 ~ "Genetic cluster",
+        percent_clustered_2022 ~ "Percentage in cluster",
+        zc_income ~ "Median income",
+       predictor_zc_per_poverty ~ "Percentage below poverty level",
+      predictor_zc_per_hispanic ~ "Percentage Hispanic",
+      predictor_zc_per_education ~ 'Percentage high school education',
+      predictor_zc_per_race ~ 'Percentage White',
+      predictor_zc_per_employment ~ 'Percentage employed'),
         # outcome_diagnosis  ~ "Late-stage Diagnosis",
         # outcome_care  ~ "In Care",
         # outcome_vl_supp  ~ "Viral Suppression"),
@@ -569,7 +583,8 @@ county.zip.tbl1 = county.df %>%
     missing_text = "Missing"                                    # how missing values should display
   )
 write_csv(county.zip.tbl1 %>% as.data.frame(), paste0(result_file_loc, "county_tbl1_zip.csv", sep = ""))
-# county.all.tbl1 = county.df %>% 
+
+# county.zip.tbl1 = county.df %>% 
 #   select(reg_variable.vec) %>% # keep only columns of interest
 #   tbl_summary(     
 #     # by = outcome,                                               # stratify entire table by outcome
