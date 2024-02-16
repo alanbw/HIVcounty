@@ -54,11 +54,16 @@ read_county_data <- function(directory_loc,
   
   county_zip.df = read_csv(paste(directory_loc, county_zip_file_subloc, sep="")) %>%
     mutate(across(where(is.character), toupper)) %>%
-    mutate(across(.cols = c(rsd_zip_cd), pad.zip))
+    mutate(across(.cols = c(zip_code), pad.zip))
 
+  #need to merge in zip code data twice. one for diagnosis and one for current zip code
+  county.df = left_join(county_demo.df, 
+                        county_zip.df %>% select(zip_code, ends_with("rsd")),
+                                  by = c( "rsd_zip_cd" = "zip_code"))
   
-  county.df = left_join(county_demo.df, county_zip.df,
-                                  by = c( "rsd_zip_cd" = "rsd_zip_cd"))
+  county.df = left_join(county.df, 
+                        county_zip.df %>% select(zip_code, ends_with("cur")),
+                        by = c( "cur_zip_cd" = "zip_code"))
   
   #county.df  = county_demo.df
   
@@ -87,7 +92,7 @@ univariate_reg <- function(county.df,
     p_val_uni = NULL
   )
   
-  for (reg_variable_ind in reg_variable.vec) {
+  for (reg_variable_ind in predictors) {
     
     regression_formula <- paste0(outcome_var, " ~ ", reg_variable_ind, " + (1 | ", random_effect_var , ")")
     
