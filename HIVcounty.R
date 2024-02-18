@@ -18,20 +18,26 @@ library('glmmLasso')
 library('nlme')
 library('mapview')
 library('tidycensus')
+library('here')
 data("zip_code_db")
 source("HIVcounty_func.R")
 
-directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/"
-result_file_loc = paste(directory_loc,'Results',sep = '/')
+# directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/"
+directory_loc = paste0(here(),'/')
+result_file_loc = here('Results/')
 
-county_demo_file_subloc = "clark_county_demographics.csv"
-county_zip_file_subloc =  "clark_county_by_zip.csv"
+county_demo_file_subloc = "Nevada_eHARS_demographics_073123.csv"
+county_zip_file_subloc =  "Nevada_eHARS_by_zip.csv_073123.csv"
 #county_test_file_subloc = "Clark_County_data/2023 SNHD testing sites.xlsx"
 county_test_file_subloc = "2023 SNHD testing sites.xlsx"
 
 county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
+county_zip_list_full = search_county("Clark", "NV")
 
+# load("~/Documents/Projects/Nevada/data requests/NV_Data_Processing_Scripts/reference_files/CC_zips.Rdata")
 
+# all.equal(county_zip_list_full,cc.zips)
+# identical(county_zip_list_full$zipcode,cc.zips$zipcode)
 
 #county_demo_file_subloc = "San_Diego_data/sd_county_demographics.csv"
 #county_zip_file_subloc = "San_Diego_data/sd_county_by_zip.csv"
@@ -47,8 +53,8 @@ testing_site_bool = TRUE
 
 county.df  = read_county_data(directory_loc = directory_loc,
                               county_demo_file_subloc = county_demo_file_subloc,
-                              county_zip_file_subloc = county_zip_file_subloc,
-                              county_zip_list = county_zip_list
+                              county_zip_file_subloc = county_zip_file_subloc
+                              # county_zip_list = county_zip_list
 ) 
 
 #Population - B01003_001 Estimate!!Total TOTAL POPULATION
@@ -185,7 +191,7 @@ reg_variable_ind.vec = c(
   "clustered_2022")
 
 reg_variable_zip.vec = c(
-  #"percent_clustered_2022",
+  "percent_clustered_2022",
   "zc_income",
   "predictor_zc_per_poverty",
   "predictor_zc_per_hispanic",
@@ -202,16 +208,25 @@ reg_variable.vec = c(reg_variable_ind.vec, reg_variable_zip.vec)
 
 if (testing_site_bool) {
   
+  # county_testing_site.df = read_excel(paste(directory_loc, county_test_file_subloc, sep="")) %>%
+  #   rename(zip_code = `Site zip code`) %>%
+  #   mutate(across(where(is.character), toupper)) %>%
+  #   mutate(zip_code = pad.zip(zip_code),
+  #          testing_site_bin = 1) %>%
+  #   select(zip_code, testing_site_bin) 
+  
   county_testing_site.df = read_excel(paste(directory_loc, county_test_file_subloc, sep="")) %>%
     rename(zip_code = `Site zip code`) %>%
     mutate(across(where(is.character), toupper)) %>%
-    mutate(zip_code = pad.zip(zip_code),
-           testing_site_bin = 1) %>%
-    select(zip_code, testing_site_bin) 
+    mutate(zip_code = pad.zip(zip_code)) %>%
+    group_by(zip_code) %>%
+    summarize(n.testing.sites.zip = n(),
+     testing_site_bin = 1) %>%
+    select(zip_code, testing_site_bin,n.testing.sites.zip)
   
   county.df = county.df %>% left_join(county_testing_site.df,
                          by = join_by(rsd_zip_cd == zip_code),
-                         relationship = "many-to-many") %>%
+                         relationship = "many-to-one") %>%
     mutate(testing_site_bin = ifelse(is.na(testing_site_bin), 0, testing_site_bin))
   
   reg_variable.vec = c(reg_variable.vec, "testing_site_bin")
@@ -375,6 +390,10 @@ regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
               outcome_res.df.round = outcome_res.df.round))
 })
 
+
+regression.output.list$supp$reg_res.df
+regression.output.list$care$reg_res.df
+regression.output.list$diagnosis$reg_res.df
 
 ################
 ## Geographic maps

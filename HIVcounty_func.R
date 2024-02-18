@@ -1,3 +1,4 @@
+options(tigris_use_cache = TRUE)
 pad.zip <-  function(x){str_pad(x,side = 'left',pad = '0',width = 5)}
 
 pvalFormat <- function(p.values, method = 'none', replace = FALSE, math = TRUE,empty.cell.value = '-'){
@@ -43,8 +44,8 @@ pvalFormat <- function(p.values, method = 'none', replace = FALSE, math = TRUE,e
 
 read_county_data <- function(directory_loc,
                              county_demo_file_subloc,
-                             county_zip_file_subloc,
-                             county_zip_list
+                             county_zip_file_subloc
+                             # county_zip_list
                              ) {
   
   county_demo.df = read_csv(paste(directory_loc, county_demo_file_subloc, sep="")) %>% 
@@ -53,24 +54,28 @@ read_county_data <- function(directory_loc,
   
   county_zip.df = read_csv(paste(directory_loc, county_zip_file_subloc, sep="")) %>%
     mutate(across(where(is.character), toupper)) %>%
-    mutate(across(.cols = c(rsd_zip_cd), pad.zip))
+    mutate(across(.cols = c(zip_code), pad.zip))
 
+  #need to merge in zip code data twice. one for diagnosis and one for current zip code
+  county.df = left_join(county_demo.df, 
+                        county_zip.df %>% select(zip_code, ends_with("rsd")),
+                                  by = c( "rsd_zip_cd" = "zip_code"))
   
-  county.df = left_join(county_demo.df, county_zip.df,
-                                  by = c( "rsd_zip_cd" = "rsd_zip_cd"))
+  county.df = left_join(county.df, 
+                        county_zip.df %>% select(zip_code, ends_with("cur")),
+                        by = c( "cur_zip_cd" = "zip_code"))
   
   #county.df  = county_demo.df
   
-  #Filter not diagnosed in county
-  
-
+  #Filter to only include those that were diagnosed and also currently live in Clark county
   county.df  = county.df %>% 
-    filter(rsd_zip_cd %in% county_zip_list) %>%
-    filter(cur_zip_cd %in% county_zip_list)
+    filter(local_residency_dx %in% 1, local_residency_cur %in% 1)
   
+  # Filter to those diagnosed prior to 2022, and were not dead prior to 2022
   county.df = county.df %>% 
     filter(`Diagnosis year` <= 2022) %>%
-    filter(is.na(death_year) | death_year > 2022)
+    filter(is.na(death_year) | death_year > 2022) %>%
+    filter(!`Diagnosis status` %in% c('PEDIATRIC AIDS','PEDIATRIC HIV'))
   
   return(county.df)
 }
@@ -87,7 +92,7 @@ univariate_reg <- function(county.df,
     p_val_uni = NULL
   )
   
-  for (reg_variable_ind in reg_variable.vec) {
+  for (reg_variable_ind in predictors) {
     
     regression_formula <- paste0(outcome_var, " ~ ", reg_variable_ind, " + (1 | ", random_effect_var , ")")
     
@@ -268,9 +273,16 @@ geo_map <- function(county.df,
   p_popup <- paste0("<strong>", title_a, ": </strong>", zcta_level.df$per_outcome)
   breaks_qt <- classIntervals(zcta_level.df$per_outcome, n = break_num, style = "quantile")
   
-  HIV_geomap = leaflet(zcta_level.df) %>%
+  HIV_geomap = zcta_level.df %>%
+    #added this line of code to prevent the following error: 
+    # Warning message:
+    # sf layer has inconsistent datum (+proj=longlat +datum=NAD83 +no_defs).
+  # Need '+proj=longlat +datum=WGS84' 
+    # https://community.rstudio.com/t/how-to-map-tidycensus-list-output/13547/4
+    sf::st_transform(4326) %>%
+    leaflet() %>% 
     addPolygons(
-      stroke = FALSE, 
+      stroke = F, 
       fillColor = ~pal_fun(per_outcome),
       fillOpacity = 0.8, smoothFactor = 0.5,
       popup = p_popup) %>%
