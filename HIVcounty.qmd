@@ -64,11 +64,11 @@ We create an analytic dataset that includes individual and zip code level covari
 #use output till we update alltables file in Current Data
 #load("~/Documents/Projects/Nevada/data #requests/NV_Data_Processing_Scripts/output/Nevada_eHARS_alltables_073123.Rdata")
 
-directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/"
+# directory_loc = "/Users/ravigoyal/Dropbox/Academic/Research/Projects/HIVcounty/Clark_County_data/"
 
-load(paste(directory_loc, "Nevada_eHARS_alltables_073123.Rdata", sep=""))
+# load(paste(directory_loc, "Nevada_eHARS_alltables_073123.Rdata", sep=""))
 
-#directory_loc = paste0(here(),'/')
+directory_loc = paste0(here(),'/')
 
 result_file_loc = paste(directory_loc, "Results/", sep = "")
 
@@ -840,69 +840,69 @@ reg_variable.vec_cur = reg_variable.vec_cur[-which(reg_variable.vec_cur =="zc_in
 ## Regression
 ################
 
-outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
-random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
-
-outcome_var_list <- list("diagnosis" = list(outcome = 'outcome_diagnosis',
-                              random = 'rsd_zip_cd',
-                              data = county.df,
-                              predictors = reg_variable.vec_rsd),
-                         'care' = list(outcome = 'outcome_care',
-                              random = 'cur_zip_cd',
-                              data = county.df,
-                              predictors = reg_variable.vec_cur),
-                         'supp' = list(outcome = 'outcome_vl_supp',
-                                       random = 'cur_zip_cd',
-                                       data = county.df,
-                                       predictors = reg_variable.vec_cur))
-
-var_list <- outcome_var_list[[1]]
-  
-regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
-
-  outcome_var_i = var_list$outcome
-  print(outcome_var_i)
-
-  desc_res.df = var_list$data %>%
-    select(all_of(var_list$predictors), !! outcome_var_i) %>%
-    tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
-    rename(variable = `**Characteristic**`)
-
-  print('univariate')
-  uni_reg_res.df = univariate_reg(county.df = var_list$data,
-                                  predictors = var_list$predictors,
-                                  outcome_var = var_list$outcome,
-                                  random_effect_var = var_list$random)
-  print('lasso tune')
-  lambda_tune = Lasso_tune_lambda(county.df = var_list$data,
-                                  predictors = var_list$predictors,
-                                  outcome_var = var_list$outcome,
-                                  random_effect_var = var_list$random)
-  print('lasso reg')
-  multi_reg_res.df = Lasso_reg(county.df = var_list$data,
-                               predictors = var_list$predictors,
-                               outcome_var = var_list$outcome,
-                               random_effect_var = var_list$random,
-                               lambda_tune = lambda_tune)
-
-  reg_res.df = full_join(uni_reg_res.df$summary.table, multi_reg_res.df$summary.table, by = "variable")
-
-  outcome_res.df = left_join(desc_res.df, reg_res.df, by = "variable")
-  outcome_res.df.round <- outcome_res.df %>%
-    mutate(across(.cols = c(estimate_uni, estimate_multi),.fns = function(x){round(x,digits = 2)})) %>%
-    mutate(across(.cols = c(p_val_uni,p_val_multi ),.fns = function(x){pvalFormat(x,empty.cell.value = '-')}))
-
-  write_csv(outcome_res.df, paste0(result_file_loc, outcome_var_i, "_all_tbl.csv", sep = ""))
-  write_csv(outcome_res.df.round, paste0(result_file_loc, outcome_var_i, "_all_tbl_rounded.csv", sep = ""))
-
-  return(list(univariate = uni_reg_res.df,
-              lambda_tune = lambda_tune,
-              multi_reg_res.df = multi_reg_res.df,
-              reg_res.df = reg_res.df,
-              outcome_res.df = outcome_res.df,
-              outcome_res.df.round = outcome_res.df.round))
-})
-save(regression.output.list,file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
+# outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
+# random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
+# 
+# outcome_var_list <- list("diagnosis" = list(outcome = 'outcome_diagnosis',
+#                               random = 'rsd_zip_cd',
+#                               data = county.df,
+#                               predictors = reg_variable.vec_rsd),
+#                          'care' = list(outcome = 'outcome_care',
+#                               random = 'cur_zip_cd',
+#                               data = county.df,
+#                               predictors = reg_variable.vec_cur),
+#                          'supp' = list(outcome = 'outcome_vl_supp',
+#                                        random = 'cur_zip_cd',
+#                                        data = county.df,
+#                                        predictors = reg_variable.vec_cur))
+# 
+# var_list <- outcome_var_list[[1]]
+#   
+# regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
+# 
+#   outcome_var_i = var_list$outcome
+#   print(outcome_var_i)
+# 
+#   desc_res.df = var_list$data %>%
+#     select(all_of(var_list$predictors), !! outcome_var_i) %>%
+#     tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
+#     rename(variable = `**Characteristic**`)
+# 
+#   print('univariate')
+#   uni_reg_res.df = univariate_reg(county.df = var_list$data,
+#                                   predictors = var_list$predictors,
+#                                   outcome_var = var_list$outcome,
+#                                   random_effect_var = var_list$random)
+#   print('lasso tune')
+#   lambda_tune = Lasso_tune_lambda(county.df = var_list$data,
+#                                   predictors = var_list$predictors,
+#                                   outcome_var = var_list$outcome,
+#                                   random_effect_var = var_list$random)
+#   print('lasso reg')
+#   multi_reg_res.df = Lasso_reg(county.df = var_list$data,
+#                                predictors = var_list$predictors,
+#                                outcome_var = var_list$outcome,
+#                                random_effect_var = var_list$random,
+#                                lambda_tune = lambda_tune)
+# 
+#   reg_res.df = full_join(uni_reg_res.df$summary.table, multi_reg_res.df$summary.table, by = "variable")
+# 
+#   outcome_res.df = left_join(desc_res.df, reg_res.df, by = "variable")
+#   outcome_res.df.round <- outcome_res.df %>%
+#     mutate(across(.cols = c(estimate_uni, estimate_multi),.fns = function(x){round(x,digits = 2)})) %>%
+#     mutate(across(.cols = c(p_val_uni,p_val_multi ),.fns = function(x){pvalFormat(x,empty.cell.value = '-')}))
+# 
+#   write_csv(outcome_res.df, paste0(result_file_loc, outcome_var_i, "_all_tbl.csv", sep = ""))
+#   write_csv(outcome_res.df.round, paste0(result_file_loc, outcome_var_i, "_all_tbl_rounded.csv", sep = ""))
+# 
+#   return(list(univariate = uni_reg_res.df,
+#               lambda_tune = lambda_tune,
+#               multi_reg_res.df = multi_reg_res.df,
+#               reg_res.df = reg_res.df,
+#               outcome_res.df = outcome_res.df,
+#               outcome_res.df.round = outcome_res.df.round))
+# })
+# save(regression.output.list,file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
 load(file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
 # 
 # regression.output.list$supp$reg_res.df
