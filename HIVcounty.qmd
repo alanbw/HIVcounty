@@ -37,6 +37,7 @@ library('mapview')
 library('tidycensus')
 library('here')
 library('gt')
+library('sf')
 data("zip_code_db")
 source("HIVcounty_func.R")
 
@@ -74,24 +75,13 @@ result_file_loc = paste(directory_loc, "Results/", sep = "")
 
 county_demo_file_subloc = "Nevada_eHARS_demographics_073123.csv"
 county_zip_file_subloc =  "Nevada_eHARS_by_zip.csv_073123.csv"
-#county_test_file_subloc = "Clark_County_data/2023 SNHD testing sites.xlsx"
 county_test_file_subloc = "2023 SNHD testing sites.xlsx"
 
 county_zip_list = search_county("Clark", "NV") %>% pull(zipcode)
 county_zip_list_full = search_county("Clark", "NV")
 
-# load("~/Documents/Projects/Nevada/data requests/NV_Data_Processing_Scripts/reference_files/CC_zips.Rdata")
-
-# all.equal(county_zip_list_full,cc.zips)
-# identical(county_zip_list_full$zipcode,cc.zips$zipcode)
-
-#county_demo_file_subloc = "San_Diego_data/sd_county_demographics.csv"
-#county_zip_file_subloc = "San_Diego_data/sd_county_by_zip.csv"
-#county_vl_file_subloc = "San_Diego_data/sd_viral_suppression_by_year.csv"
-
 testing_site_bool = TRUE
 
-#######
 
 ################
 ## Create analytic dataset
@@ -170,11 +160,11 @@ zipcode.df <- get_acs(geography = "zcta",
                                     "B23025_003",
                                     'B23025_004'),
                       year = 2021,
+                      survey = "acs5",
                       zcta = county_zip_list) 
 
 zipcode_wide.df = zipcode.df %>%
   select(GEOID, variable, estimate) %>%
-  # mutate(GEOID = as.numeric(GEOID)) %>%
   pivot_wider(names_from = variable,
               values_from = estimate) %>%
   rename(zc_population = B01003_001,
@@ -197,12 +187,25 @@ zipcode_wide.df = zipcode.df %>%
   mutate(predictor_zc_per_race = zc_white / zc_population) %>%
   mutate(predictor_zc_per_employment = zc_employment / zc_employment_total)
 
+#create binary versions (high/low) of zip code level predictors based on median values
+# zipcode_wide.df <- zipcode_wide.df %>%
+#   mutate(across(.cols = c(predictor_zc_per_poverty,
+#                           predictor_zc_per_hispanic,
+#                           predictor_zc_per_education,
+#                           predictor_zc_per_race,
+#                           predictor_zc_per_employment), .fns = function(x){
+#                             med.x = median(x, na.rm = TRUE)
+#                             binary = as.numeric(x > med.x)
+#                             return(binary)
+#                           }))
+#                 # , .names = "binary_{.col}"))
+
 county.df = left_join(county.df, zipcode_wide.df,
                       by = c( "rsd_zip_cd" = "GEOID")) 
 
 county.df = left_join(county.df, zipcode_wide.df,
                       by = c( "cur_zip_cd" = "GEOID"), suffix = c("_rsd", "_cur"))
-
+                
 
 
 
@@ -407,12 +410,20 @@ reg_variable_zip.vec = c(
 reg_variable_rsd_zip.vec = paste(reg_variable_zip.vec, "rsd", sep="_")
 reg_variable_cur_zip.vec = paste(reg_variable_zip.vec, "cur", sep="_")
 
+# reg_variable_rsd_zip.vec.cont <- reg_variable_rsd_zip.vec
+# reg_variable_cur_zip.vec.cont <- reg_variable_cur_zip.vec
+
+# #create special list of cars with continuous versions to check NA and rmeove people with missing values
+# reg_variable.vec_rsd_checkna = c(reg_variable_ind.vec, reg_variable_rsd_zip.vec.cont)
+# reg_variable.vec_cur_checkna = c(reg_variable_ind.vec, reg_variable_cur_zip.vec.cont)
+# 
 reg_variable.vec_rsd = c(reg_variable_ind.vec, reg_variable_rsd_zip.vec)
 reg_variable.vec_cur = c(reg_variable_ind.vec, reg_variable_cur_zip.vec)
 
 ################
 ## Add testing data
 ################
+
 
 if (testing_site_bool) {
   
@@ -456,6 +467,25 @@ county.df = county.df %>%
 # county.df.cur = county.df %>%
 #   filter(!if_any(.cols = all_of(reg_variable.vec_cur),~ is.na(.)))
 
+#convert zip code level variables to high/low using median after all people with misisng data have been removed
+county.df <- county.df %>%
+  mutate(across(.cols = c(matches('predictor_zc|percent_clustered|zc_income')), .fns = function(x){
+                            med.x = median(x, na.rm = TRUE)
+                            binary = as.numeric(x > med.x)
+                            # return(binary)
+                            return(data.frame(binary = binary,med.x = med.x))
+                          },.unpack = T))
+
+
+#paste binary onto zip code variable names to use high/low versions just created above
+reg_variable_cur_zip.vec <- paste(reg_variable_cur_zip.vec, "binary", sep="_")
+reg_variable_rsd_zip.vec <- paste(reg_variable_rsd_zip.vec, "binary", sep="_")
+
+
+
+reg_variable.vec_rsd <- gsub(x = reg_variable.vec_rsd, pattern = '^((?!test).*)(_rsd)$', replacement = '\\1\\2_binary',fixed = F,perl = T)
+reg_variable.vec_cur <- gsub(x = reg_variable.vec_cur, pattern = '^((?!test).*)(_cur)$', replacement = '\\1\\2_binary',fixed = F,perl = T)
+
 county.df.rsd_zip_cd.single = county.df %>%
   distinct(rsd_zip_cd,.keep_all = TRUE) %>%
   select(rsd_zip_cd, 
@@ -465,7 +495,6 @@ county.df.cur_zip_cd.single = county.df %>%
   distinct(cur_zip_cd,.keep_all = TRUE) %>%
   select(cur_zip_cd, 
          all_of(reg_variable_cur_zip.vec))
-  
 
 ```
 
@@ -503,13 +532,13 @@ county.tbl1 = county.df %>%
       # Education ~ "Education",
       Sequence_ever ~ 'Sequence available',
       clustered_2022 ~ "Genetic cluster",
-      percent_clustered_2022_cur ~ "Percentage in cluster",
-        zc_income_cur ~ "Median income",
-       predictor_zc_per_poverty_cur ~ "Percentage below poverty level",
-      predictor_zc_per_hispanic_cur ~ "Percentage Hispanic",
-      predictor_zc_per_education_cur ~ 'Percentage high school education',
-      predictor_zc_per_race_cur ~ 'Percentage White',
-      predictor_zc_per_employment_cur ~ 'Percentage employed'),
+      percent_clustered_2022_cur_binary ~ "Percentage in cluster",
+        zc_income_cur_binary ~ "Median income",
+       predictor_zc_per_poverty_cur_binary ~ "Percentage below poverty level",
+      predictor_zc_per_hispanic_cur_binary ~ "Percentage Hispanic",
+      predictor_zc_per_education_cur_binary ~ 'Percentage high school education',
+      predictor_zc_per_race_cur_binary ~ 'Percentage White',
+      predictor_zc_per_employment_cur_binary ~ 'Percentage employed'),
     missing_text = "Missing"                                    # how missing values should display
   )
 
@@ -519,17 +548,17 @@ outcomes.factor.list <- list("diagnosis" = list(outcome = 'outcome_diagnosis_fac
                               random = 'rsd_zip_cd',
                               data = county.df,
                               predictors.zip = reg_variable_rsd_zip.vec,
-                              suffix.zip = '_rsd'),
+                              suffix.zip = '_rsd_binary'),
                          'care' = list(outcome = 'outcome_care_factor',
                               random = 'cur_zip_cd',
                               data = county.df,
                               predictors.zip = reg_variable_cur_zip.vec,
-                              suffix.zip = '_cur'),
+                              suffix.zip = '_cur_binary'),
                          'supp' = list(outcome = 'outcome_vl_supp_factor',
                                        random = 'cur_zip_cd',
                                        data = county.df,
                                        predictors.zip = reg_variable_cur_zip.vec,
-                              suffix.zip = '_cur'))
+                              suffix.zip = '_cur_binary'))
 # 
 outcomes.factor <- c('outcome_diagnosis_factor', 'outcome_care_factor', 'outcome_vl_supp_factor')
 # outcomes.factor.list <- as.list(outcomes.factor)
@@ -632,13 +661,13 @@ county.rsd_zip.tbl1 = county.df %>%
     digits = all_continuous() ~ 1,                              # rounding for continuous columns
     type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
     label  = list(                                              # display labels for column names
-      percent_clustered_2022_rsd   ~ "Percent clustered (2022)",                           
-      zc_income_rsd ~ "Median income",
-      predictor_zc_per_poverty_rsd ~ "Percentage below poverty level",
-      predictor_zc_per_hispanic_rsd ~ "Percentage Hispanic",
-      predictor_zc_per_education_rsd ~ 'Percentage high school education or higher',
-      predictor_zc_per_race_rsd ~ 'Percentage White',
-      predictor_zc_per_employment_rsd ~ 'Percentage employed'),
+      percent_clustered_2022_rsd_binary   ~ "Percent clustered (2022)",                           
+      zc_income_rsd_binary ~ "Median income",
+      predictor_zc_per_poverty_rsd_binary ~ "Percentage below poverty level",
+      predictor_zc_per_hispanic_rsd_binary ~ "Percentage Hispanic",
+      predictor_zc_per_education_rsd_binary ~ 'Percentage high school education or higher',
+      predictor_zc_per_race_rsd_binary ~ 'Percentage White',
+      predictor_zc_per_employment_rsd_binary ~ 'Percentage employed'),
     missing_text = "Missing"                                    # how missing values should display
   )
 write_csv(county.rsd_zip.tbl1 %>% as.data.frame(), paste0(result_file_loc, "county_tbl1_rsd_zip.csv", sep = ""))
@@ -653,13 +682,13 @@ county.cur_zip.tbl1 = county.df %>%
     digits = all_continuous() ~ 1,                              # rounding for continuous columns
     type   = all_categorical() ~ "categorical",                 # force all categorical levels to display
     label  = list(                                              # display labels for column names
-      percent_clustered_2022_cur   ~ "Percent clustered (2022)",                           
-      zc_income_cur ~ "Median income",
-      predictor_zc_per_poverty_cur ~ "Percentage below poverty level",
-      predictor_zc_per_hispanic_cur ~ "Percentage Hispanic",
-      predictor_zc_per_education_cur ~ 'Percentage high school education or higher',
-      predictor_zc_per_race_cur ~ 'Percentage White',
-      predictor_zc_per_employment_cur ~ 'Percentage employed'),
+      percent_clustered_2022_cur_binary   ~ "Percent clustered (2022)",
+      zc_income_cur_binary ~ "Median income",
+      predictor_zc_per_poverty_cur_binary ~ "Percentage below poverty level",
+      predictor_zc_per_hispanic_cur_binary ~ "Percentage Hispanic",
+      predictor_zc_per_education_cur_binary ~ 'Percentage high school education or higher',
+      predictor_zc_per_race_cur_binary ~ 'Percentage White',
+      predictor_zc_per_employment_cur_binary ~ 'Percentage employed'),
     missing_text = "Missing"                                    # how missing values should display
   )
 write_csv(county.cur_zip.tbl1 %>% as.data.frame(), paste0(result_file_loc, "county_tbl1_cur_zip.csv", sep = ""))
@@ -756,152 +785,164 @@ county.cur_zip.tbl1
 
 ########
 ########
+# 
+# county.df = county.df %>%
+#   mutate(med_percent_clustered_2022_rsd = median(percent_clustered_2022_rsd)) %>% 
+#   mutate(percent_clustered_2022_rsd = as.numeric(percent_clustered_2022_rsd > med_percent_clustered_2022_rsd)) %>%
+#   select(-med_percent_clustered_2022_rsd)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_poverty_rsd = median(predictor_zc_per_poverty_rsd)) %>% 
+#   mutate(predictor_zc_per_poverty_rsd = as.numeric(predictor_zc_per_poverty_rsd > med_predictor_zc_per_poverty_rsd)) %>%
+#   select(-med_predictor_zc_per_poverty_rsd)
+# 
+# county.df = county.df %>%
+#   mutate(med_zc_income_rsd = median(zc_income_rsd)) %>% 
+#   mutate(zc_income_rsd = as.numeric(zc_income_rsd > med_zc_income_rsd)) %>%
+#   select(-med_zc_income_rsd)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_hispanic_rsd = median(predictor_zc_per_hispanic_rsd)) %>% 
+#   mutate(predictor_zc_per_hispanic_rsd = as.numeric(predictor_zc_per_hispanic_rsd > med_predictor_zc_per_hispanic_rsd)) %>%
+#   select(-med_predictor_zc_per_hispanic_rsd)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_education_rsd = median(predictor_zc_per_education_rsd)) %>% 
+#   mutate(predictor_zc_per_education_rsd = as.numeric(predictor_zc_per_education_rsd > med_predictor_zc_per_education_rsd)) %>%
+#   select(-med_predictor_zc_per_education_rsd)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_race_rsd = median(predictor_zc_per_race_rsd)) %>% 
+#   mutate(predictor_zc_per_race_rsd = as.numeric(predictor_zc_per_race_rsd > med_predictor_zc_per_race_rsd)) %>%
+#   select(-med_predictor_zc_per_race_rsd)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_employment_rsd = median(predictor_zc_per_employment_rsd)) %>% 
+#   mutate(predictor_zc_per_employment_rsd = as.numeric(predictor_zc_per_employment_rsd > med_predictor_zc_per_employment_rsd)) %>%
+#   select(-med_predictor_zc_per_employment_rsd)
+# 
+# ###
+# 
+# county.df = county.df %>%
+#   mutate(med_percent_clustered_2022_cur = median(percent_clustered_2022_cur)) %>% 
+#   mutate(percent_clustered_2022_cur = as.numeric(percent_clustered_2022_cur > med_percent_clustered_2022_cur)) %>%
+#   select(-med_percent_clustered_2022_cur)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_poverty_cur = median(predictor_zc_per_poverty_cur)) %>% 
+#   mutate(predictor_zc_per_poverty_cur = as.numeric(predictor_zc_per_poverty_cur > med_predictor_zc_per_poverty_cur)) %>%
+#   select(-med_predictor_zc_per_poverty_cur)
+# 
+# county.df = county.df %>%
+#   mutate(med_zc_income_cur = median(zc_income_cur)) %>% 
+#   mutate(zc_income_cur = as.numeric(zc_income_cur > med_zc_income_cur)) %>%
+#   select(-med_zc_income_cur)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_hispanic_cur = median(predictor_zc_per_hispanic_cur)) %>% 
+#   mutate(predictor_zc_per_hispanic_cur = as.numeric(predictor_zc_per_hispanic_cur > med_predictor_zc_per_hispanic_cur)) %>%
+#   select(-med_predictor_zc_per_hispanic_cur)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_education_cur = median(predictor_zc_per_education_cur)) %>% 
+#   mutate(predictor_zc_per_education_cur = as.numeric(predictor_zc_per_education_cur > med_predictor_zc_per_education_cur)) %>%
+#   select(-med_predictor_zc_per_education_cur)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_race_cur = median(predictor_zc_per_race_cur)) %>% 
+#   mutate(predictor_zc_per_race_cur = as.numeric(predictor_zc_per_race_cur > med_predictor_zc_per_race_cur)) %>%
+#   select(-med_predictor_zc_per_race_cur)
+# 
+# county.df = county.df %>%
+#   mutate(med_predictor_zc_per_employment_cur = median(predictor_zc_per_employment_cur)) %>% 
+#   mutate(predictor_zc_per_employment_cur = as.numeric(predictor_zc_per_employment_cur > med_predictor_zc_per_employment_cur)) %>%
+#   select(-med_predictor_zc_per_employment_cur)
 
-county.df = county.df %>%
-  mutate(med_percent_clustered_2022_rsd = median(percent_clustered_2022_rsd)) %>% 
-  mutate(percent_clustered_2022_rsd = as.numeric(percent_clustered_2022_rsd > med_percent_clustered_2022_rsd)) %>%
-  select(-med_percent_clustered_2022_rsd)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_poverty_rsd = median(predictor_zc_per_poverty_rsd)) %>% 
-  mutate(predictor_zc_per_poverty_rsd = as.numeric(predictor_zc_per_poverty_rsd > med_predictor_zc_per_poverty_rsd)) %>%
-  select(-med_predictor_zc_per_poverty_rsd)
-
-county.df = county.df %>%
-  mutate(med_zc_income_rsd = median(zc_income_rsd)) %>% 
-  mutate(zc_income_rsd = as.numeric(zc_income_rsd > med_zc_income_rsd)) %>%
-  select(-med_zc_income_rsd)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_hispanic_rsd = median(predictor_zc_per_hispanic_rsd)) %>% 
-  mutate(predictor_zc_per_hispanic_rsd = as.numeric(predictor_zc_per_hispanic_rsd > med_predictor_zc_per_hispanic_rsd)) %>%
-  select(-med_predictor_zc_per_hispanic_rsd)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_education_rsd = median(predictor_zc_per_education_rsd)) %>% 
-  mutate(predictor_zc_per_education_rsd = as.numeric(predictor_zc_per_education_rsd > med_predictor_zc_per_education_rsd)) %>%
-  select(-med_predictor_zc_per_education_rsd)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_race_rsd = median(predictor_zc_per_race_rsd)) %>% 
-  mutate(predictor_zc_per_race_rsd = as.numeric(predictor_zc_per_race_rsd > med_predictor_zc_per_race_rsd)) %>%
-  select(-med_predictor_zc_per_race_rsd)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_employment_rsd = median(predictor_zc_per_employment_rsd)) %>% 
-  mutate(predictor_zc_per_employment_rsd = as.numeric(predictor_zc_per_employment_rsd > med_predictor_zc_per_employment_rsd)) %>%
-  select(-med_predictor_zc_per_employment_rsd)
-
-###
-
-county.df = county.df %>%
-  mutate(med_percent_clustered_2022_cur = median(percent_clustered_2022_cur)) %>% 
-  mutate(percent_clustered_2022_cur = as.numeric(percent_clustered_2022_cur > med_percent_clustered_2022_cur)) %>%
-  select(-med_percent_clustered_2022_cur)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_poverty_cur = median(predictor_zc_per_poverty_cur)) %>% 
-  mutate(predictor_zc_per_poverty_cur = as.numeric(predictor_zc_per_poverty_cur > med_predictor_zc_per_poverty_cur)) %>%
-  select(-med_predictor_zc_per_poverty_cur)
-
-county.df = county.df %>%
-  mutate(med_zc_income_cur = median(zc_income_cur)) %>% 
-  mutate(zc_income_cur = as.numeric(zc_income_cur > med_zc_income_cur)) %>%
-  select(-med_zc_income_cur)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_hispanic_cur = median(predictor_zc_per_hispanic_cur)) %>% 
-  mutate(predictor_zc_per_hispanic_cur = as.numeric(predictor_zc_per_hispanic_cur > med_predictor_zc_per_hispanic_cur)) %>%
-  select(-med_predictor_zc_per_hispanic_cur)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_education_cur = median(predictor_zc_per_education_cur)) %>% 
-  mutate(predictor_zc_per_education_cur = as.numeric(predictor_zc_per_education_cur > med_predictor_zc_per_education_cur)) %>%
-  select(-med_predictor_zc_per_education_cur)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_race_cur = median(predictor_zc_per_race_cur)) %>% 
-  mutate(predictor_zc_per_race_cur = as.numeric(predictor_zc_per_race_cur > med_predictor_zc_per_race_cur)) %>%
-  select(-med_predictor_zc_per_race_cur)
-
-county.df = county.df %>%
-  mutate(med_predictor_zc_per_employment_cur = median(predictor_zc_per_employment_cur)) %>% 
-  mutate(predictor_zc_per_employment_cur = as.numeric(predictor_zc_per_employment_cur > med_predictor_zc_per_employment_cur)) %>%
-  select(-med_predictor_zc_per_employment_cur)
 
 
 ########
 ########
 
-reg_variable.vec_rsd = reg_variable.vec_rsd[-which(reg_variable.vec_rsd =="zc_income_rsd")]
-reg_variable.vec_cur = reg_variable.vec_cur[-which(reg_variable.vec_cur =="zc_income_cur")]
-  
+# reg_variable.vec_rsd = reg_variable.vec_rsd[-which(reg_variable.vec_rsd =="zc_income_rsd_binary")]
+# reg_variable.vec_cur = reg_variable.vec_cur[-which(reg_variable.vec_cur =="zc_income_cur_binary")]
+
 ################
 ## Regression
 ################
+# 
+outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
+random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
 
-# outcome_var_list = c("outcome_diagnosis", "outcome_care", "outcome_vl_supp")
-# random_effect_var_list = c("rsd_zip_cd", "cur_zip_cd", "cur_zip_cd")
-# 
-# outcome_var_list <- list("diagnosis" = list(outcome = 'outcome_diagnosis',
-#                               random = 'rsd_zip_cd',
-#                               data = county.df,
-#                               predictors = reg_variable.vec_rsd),
-#                          'care' = list(outcome = 'outcome_care',
-#                               random = 'cur_zip_cd',
-#                               data = county.df,
-#                               predictors = reg_variable.vec_cur),
-#                          'supp' = list(outcome = 'outcome_vl_supp',
-#                                        random = 'cur_zip_cd',
-#                                        data = county.df,
-#                                        predictors = reg_variable.vec_cur))
-# 
-# var_list <- outcome_var_list[[1]]
-#   
-# regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
-# 
-#   outcome_var_i = var_list$outcome
-#   print(outcome_var_i)
-# 
-#   desc_res.df = var_list$data %>%
-#     select(all_of(var_list$predictors), !! outcome_var_i) %>%
-#     tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
-#     rename(variable = `**Characteristic**`)
-# 
-#   print('univariate')
-#   uni_reg_res.df = univariate_reg(county.df = var_list$data,
-#                                   predictors = var_list$predictors,
-#                                   outcome_var = var_list$outcome,
-#                                   random_effect_var = var_list$random)
-#   print('lasso tune')
-#   lambda_tune = Lasso_tune_lambda(county.df = var_list$data,
-#                                   predictors = var_list$predictors,
-#                                   outcome_var = var_list$outcome,
-#                                   random_effect_var = var_list$random)
-#   print('lasso reg')
-#   multi_reg_res.df = Lasso_reg(county.df = var_list$data,
-#                                predictors = var_list$predictors,
-#                                outcome_var = var_list$outcome,
-#                                random_effect_var = var_list$random,
-#                                lambda_tune = lambda_tune)
-# 
-#   reg_res.df = full_join(uni_reg_res.df$summary.table, multi_reg_res.df$summary.table, by = "variable")
-# 
-#   outcome_res.df = left_join(desc_res.df, reg_res.df, by = "variable")
-#   outcome_res.df.round <- outcome_res.df %>%
-#     mutate(across(.cols = c(estimate_uni, estimate_multi),.fns = function(x){round(x,digits = 2)})) %>%
-#     mutate(across(.cols = c(p_val_uni,p_val_multi ),.fns = function(x){pvalFormat(x,empty.cell.value = '-')}))
-# 
-#   write_csv(outcome_res.df, paste0(result_file_loc, outcome_var_i, "_all_tbl.csv", sep = ""))
-#   write_csv(outcome_res.df.round, paste0(result_file_loc, outcome_var_i, "_all_tbl_rounded.csv", sep = ""))
-# 
-#   return(list(univariate = uni_reg_res.df,
-#               lambda_tune = lambda_tune,
-#               multi_reg_res.df = multi_reg_res.df,
-#               reg_res.df = reg_res.df,
-#               outcome_res.df = outcome_res.df,
-#               outcome_res.df.round = outcome_res.df.round))
-# })
+outcome_var_list <- list("diagnosis" = list(outcome = 'outcome_diagnosis',
+                              random = 'rsd_zip_cd',
+                              data = county.df,
+                              predictors = reg_variable.vec_rsd),
+                         'care' = list(outcome = 'outcome_care',
+                              random = 'cur_zip_cd',
+                              data = county.df,
+                              predictors = reg_variable.vec_cur),
+                         'supp' = list(outcome = 'outcome_vl_supp',
+                                       random = 'cur_zip_cd',
+                                       data = county.df,
+                                       predictors = reg_variable.vec_cur))
+
+var_list <- outcome_var_list[[1]]
+
+regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
+
+  outcome_var_i = var_list$outcome
+  print(outcome_var_i)
+
+  desc_res.df = var_list$data %>%
+    select(all_of(var_list$predictors), !! outcome_var_i) %>%
+    tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
+    rename(variable = `**Characteristic**`)
+
+  print('univariate')
+  uni_reg_res.df = univariate_reg(county.df = var_list$data,
+                                  predictors = var_list$predictors,
+                                  outcome_var = var_list$outcome,
+                                  random_effect_var = var_list$random)
+  print('lasso tune')
+  lambda_tune = Lasso_tune_lambda(county.df = var_list$data,
+                                  predictors = var_list$predictors,
+                                  outcome_var = var_list$outcome,
+                                  random_effect_var = var_list$random)
+  print('lasso reg')
+  multi_reg_res.df = Lasso_reg(county.df = var_list$data,
+                               predictors = var_list$predictors,
+                               outcome_var = var_list$outcome,
+                               random_effect_var = var_list$random,
+                               lambda_tune = lambda_tune)
+
+  reg_res.df = full_join(uni_reg_res.df$summary.table, multi_reg_res.df$summary.table, by = "variable")
+
+  outcome_res.df = left_join(desc_res.df, reg_res.df, by = "variable")
+  outcome_res.df.round <- outcome_res.df %>%
+    mutate(across(.cols = c(estimate_uni, estimate_multi),.fns = function(x){round(x,digits = 2)})) %>%
+    mutate(across(.cols = c(p_val_uni,p_val_multi ),.fns = function(x){pvalFormat(x,empty.cell.value = '-')}))
+  
+  outcome_res.df.round.paper <- outcome_res.df.round %>%
+    mutate(estimate_uni_se = paste0(estimate_uni, " (", ifelse(se_uni < 1e-3,
+                                                               formatC(se_uni, format = "E", digits = 2), 
+                                                               round(se_uni,3)), ")"),
+          estimate_multi_se = paste0(estimate_multi, " (", ifelse(se_multi < 1e-3,
+                                                               formatC(se_multi, format = "E", digits = 2), 
+                                                               round(se_multi,3)), ")")) %>%
+    relocate(estimate_uni_se, .before = estimate_uni) %>%
+    relocate(estimate_multi_se, .before = estimate_multi)
+
+  write_csv(outcome_res.df, paste0(result_file_loc, outcome_var_i, "_all_tbl.csv", sep = ""))
+  write_csv(outcome_res.df.round, paste0(result_file_loc, outcome_var_i, "_all_tbl_rounded.csv", sep = ""))
+
+  return(list(outcome_var = outcome_var_i,
+              univariate = uni_reg_res.df,
+              lambda_tune = lambda_tune,
+              multi_reg_res.df = multi_reg_res.df,
+              reg_res.df = reg_res.df,
+              outcome_res.df = outcome_res.df,
+              outcome_res.df.round = outcome_res.df.round))
+})
 # save(regression.output.list,file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
 load(file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
 # 
@@ -909,6 +950,69 @@ load(file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
 # regression.output.list$care$reg_res.df
 # regression.output.list$diagnosis$reg_res.df
 
+tables.paper <- lapply(regression.output.list, function(output){
+  outcome_res.df.round.paper <- output$outcome_res.df.round %>%
+    mutate(estimate_uni_se = paste0(estimate_uni, " (", ifelse(se_uni < 1e-3,
+                                                               formatC(se_uni, format = "E", digits = 2), 
+                                                               round(se_uni,3)), ")"),
+          estimate_multi_se = paste0(estimate_multi, " (", ifelse(se_multi < 1e-3,
+                                                               formatC(se_multi, format = "E", digits = 2), 
+                                                               round(se_multi,3)), ")")) %>%
+    relocate(estimate_uni_se, .before = estimate_uni) %>%
+    relocate(estimate_multi_se, .before = estimate_multi) %>%
+    select(-c(estimate_uni,se_uni,estimate_multi,se_multi))
+  return(outcome_res.df.round.paper)
+})
+
+write_csv(tables.paper$diagnosis, paste0(result_file_loc, 'diagnosis', "_all_tbl_paper_rounded.csv", sep = ""))
+write_csv(tables.paper$supp, paste0(result_file_loc, 'supp', "_all_tbl_paper_rounded.csv", sep = ""))
+write_csv(tables.paper$care, paste0(result_file_loc, 'care', "_all_tbl_paper_rounded.csv", sep = ""))
+
+#combine ORs into a single table with rows as predictors and columns as outcomes.
+View( regression.output.list$diagnosis$outcome_res.df.round)
+
+poster.table.prep.fx <- function(outcome_res.df.round, zip_code_suffix = '_rsd|_rsd_binary',outcome_suffix = '_diagnosis'){
+  tab.out <- outcome_res.df.round %>%
+  mutate(across(.cols = starts_with("p_val"),.fns = function(x){str_extract(string = x,pattern = '\\*+')},.names = '{.col}_sig')) %>%
+  select(variable,estimate_uni,estimate_multi,ends_with('sig')) %>%
+  rename_with(.cols = -variable,.fn = ~ paste0(.x,outcome_suffix)) %>%
+  mutate(across(.cols = variable, .fn = ~ gsub(pattern = zip_code_suffix,replacement = '',x = .x)))
+  
+}
+
+dx.poster.table <- poster.table.prep.fx(outcome_res.df.round = regression.output.list$diagnosis$outcome_res.df.round,
+                                         zip_code_suffix = '_rsd|_rsd_binary',
+                                         outcome_suffix = '_diagnosis')
+care.poster.table <- poster.table.prep.fx(outcome_res.df.round = regression.output.list$care$outcome_res.df.round,
+                                         zip_code_suffix = '_cur|_cur_binary',
+                                         outcome_suffix = '_care')
+supp.poster.table <- poster.table.prep.fx(outcome_res.df.round = regression.output.list$supp$outcome_res.df.round,
+                                         zip_code_suffix = '_cur|_cur_binary',
+                                         outcome_suffix = '_supp')
+
+
+poster.table <- dx.poster.table %>% 
+  left_join(care.poster.table, by = "variable") %>% 
+  left_join(supp.poster.table, by = "variable") %>%
+  mutate(across(.cols = starts_with("estimate"), .fns = function(x){ifelse(x == 0,'-',round(exp(x),2))})) %>%
+  #pivot longer so easy to paste ORs and sig stars
+   pivot_longer(cols = -c(variable), names_to = c(".value", "outcome"), 
+                 names_pattern = "^(.*)_([a-z]+)") %>%
+  mutate(across(.cols = starts_with('p_val'),.fn = ~ ifelse(is.na(.x) ,'',.x))) %>%
+  mutate(estimate_uni_sig = paste0(estimate_uni,p_val_uni_sig),
+         estimate_multi_sig = paste0(estimate_multi,p_val_multi_sig)) %>%
+  select(variable,estimate_uni_sig,estimate_multi_sig,outcome) %>%
+  #pivot back to wide
+  pivot_wider(id_cols = variable,
+              names_from = outcome,
+    names_glue = "{.value}_{outcome}",
+    values_from = c(estimate_uni_sig, estimate_multi_sig)) %>%
+  relocate(variable,ends_with('diagnosis'),ends_with('care'),ends_with('supp'))
+
+write.csv(x = poster.table, file = paste0('./manuscript/poster/', "poster.table.csv", sep = ""), row.names = FALSE)
+
+
+  
 ```
 
 
@@ -955,108 +1059,307 @@ regression.output.list$diagnosis$outcome_res.df.round %>%
 
 # Map function to plot intersection of poverty and in-care, still in development
 
-# outcome <- map_outcome_list[[1]]
-# title_a = outcome$outcome_var_list_nice
-# county.df = county.df
-# county_zip_list = county_zip_list
-# outcome_var = outcome$outcome_var_list
-# geo_zip_var = outcome$random_effect_var_list
-# 
-# geo_map2 <- function(county.df,
-#                     county_zip_list,
-#                     outcome_var,
-#                     geo_zip_var,
-#                     title_a) {
-#   
-#   zcta_data <- get_acs(
-#     geography = "zcta",
-#     variables = "B19013_001",
-#     zcta = county_zip_list, 
-#     geometry = TRUE
-#   )
-#   
-#   county_summary.df = county.df %>%
-#     group_by(!! rlang::sym(geo_zip_var)) %>%
-#     summarize(n_tot = n(),
-#               n_outcome = sum(!! rlang::sym(outcome_var))) %>%
-#     ungroup() %>%
-#     mutate(per_outcome = n_outcome/n_tot) %>%
-#     mutate(rsd_zip_cd_cat = as.character(!! rlang::sym(geo_zip_var)))
-#   
-#   
-#   zcta_level.df = left_join(zcta_data,
-#                             county_summary.df,
-#                             by = c("GEOID" = "rsd_zip_cd_cat"))
-#   
-#   zcta_level.df = left_join(zcta_level.df,
-#                             zip_code_db %>% select(zipcode, lat, lng),
-#                             by = c("GEOID" = "zipcode")) %>%
-#     filter(!is.na(lat))
-#   
-#   zcta_level.df.filt <- zcta_level.df %>%
-#     mutate()
-#   
-#   # "#808080" NA color (grey)
-#   
-#   
-#   break_num = 2
-#   pal_fun <- colorQuantile("YlOrRd", NULL, n = break_num)
-#   p_popup <- paste0("<strong>", title_a, ": </strong>", zcta_level.df$per_outcome, "<br>",
-#                     "<strong>Zip code: </strong>", zcta_level.df$GEOID)
-#   breaks_qt <- classIntervals(zcta_level.df$per_outcome, n = 2, style = "quantile")
-#   colorPal <- colorQuantile("YlOrRd", zcta_level.df$per_outcome,n = 2)
-#   pal_fun(zcta_level.df$per_outcome) %>% unique()
-#   quantile.bins <- quantile(zcta_level.df$per_outcome, 
-#                                    probs = seq(0, 1,length.out = break_num + 1),
-#                                    na.rm = TRUE)
-#   cut(zcta_level.df$per_outcome, quantile.bins, labels = NULL, include.lowest = TRUE, 
-#         right = FALSE)
-#   zcta_level.df = zcta_level.df %>%
-#     mutate(color = pal_fun(per_outcome),
-#            quantile.bin = cut(per_outcome, quantile.bins, labels = FALSE, include.lowest = TRUE, 
-#         right = FALSE))
-#   
-#   colors.legend <- zcta_level.df %>%
-#     arrange(per_outcome) %>%
-#     distinct(quantile.bin,color)
-#   
-#   HIV_geomap = zcta_level.df %>%
-#     #added this line of code to prevent the following error: 
-#     # Warning message:
-#     # sf layer has inconsistent datum (+proj=longlat +datum=NAD83 +no_defs).
-#   # Need '+proj=longlat +datum=WGS84' 
-#     # https://community.rstudio.com/t/how-to-map-tidycensus-list-output/13547/4
-#     sf::st_transform(4326) %>%
-#     leaflet() %>% 
-#     addPolygons(
-#       stroke = F, 
-#       fillColor = ~color,
-#        # fillColor = ~pal_fun(n_outcome),
-#       # fillColor = ~colorPal(n_outcome),
-#       fillOpacity = 0.8, smoothFactor = 0.5,
-#       popup = p_popup) %>%
-#     addTiles()  %>%
-#      # addLegend(
-#      #      pal = colorPal,
-#      #      values = zcta_level.df$per_outcome,
-#      #      opacity = 0.3,
-#      #       labels = paste0("up to ", format(breaks_qt$brks[-1], digits = 2)),
-#      #      # title = input$selectzipcolor,
-#      #      position = "bottomleft"
-#      #    ) %>%
-#     addLegend("bottomright",
-#               # colors = brewer.pal(break_num, "YlOrRd"),
-#               colors = colors.legend %>% filter(!is.na(quantile.bin)) %>% pull(color),
-#               labels = paste0("up to ", format(breaks_qt$brks[-1], digits = 2)),
-#               title =  title_a) %>%
-#     addCircleMarkers(zcta_level.df$lng, zcta_level.df$lat, radius=zcta_level.df$n_tot/50, 
-#                      color = "blue", 
-#                      stroke = FALSE, fillOpacity = 0.5) 
-#   
-#   return(HIV_geomap)
-#   
-# }
 
+
+outcome <- map_outcome_list[[2]]
+title_a = outcome$outcome_var_list_nice
+title_a = 'High vs low poverty'
+county.df = county.df
+county_zip_list = county_zip_list
+outcome_var = outcome$outcome_var_list
+geo_zip_var = outcome$random_effect_var_list
+zip_var = 'predictor_zc_per_poverty_cur_binary'
+min.n.obs = 10
+legend.name = 'poverty'
+
+geo_map.zipvar <- function(county.df,
+                    county_zip_list,
+                    zip_var,
+                    geo_zip_var,
+                    title_a,
+                    legend.name = 'poverty',
+                    min.n.obs = 10) {
+
+  zcta_data <- get_acs(
+    geography = "zcta",
+    variables = "B19013_001",
+    zcta = county_zip_list,
+    geometry = TRUE
+  )
+
+  #for high/low census variables
+  county_summary.df = county.df %>%
+      group_by(!! rlang::sym(geo_zip_var)) %>%
+    mutate(n_tot = n()) %>%
+    ungroup() %>%
+    filter(n_tot > min.n.obs) %>%
+    distinct(!! rlang::sym(geo_zip_var),.keep_all = T) %>%
+   select(!! rlang::sym(geo_zip_var),!! rlang::sym(zip_var),n_tot) %>%
+    mutate(rsd_zip_cd_cat = as.character(!! rlang::sym(geo_zip_var)),
+           predictor.zip = as.character(!! rlang::sym(zip_var)))
+
+  zcta_level.df = left_join(zcta_data,
+                            county_summary.df,
+                            by = c("GEOID" = "rsd_zip_cd_cat"))
+
+  zcta_level.df = left_join(zcta_level.df,
+                            zip_code_db %>% select(zipcode, lat, lng),
+                            by = c("GEOID" = "zipcode")) %>%
+    filter(!is.na(lat))
+
+
+
+  
+  
+  pal_fun <- colorFactor("YlOrRd", NULL) #, na.color = "#808080"
+  
+  p_popup <- paste0("<strong>", title_a, ": </strong>", zcta_level.df$predictor.zip, "<br>",
+                    "<strong>Zip code: </strong>", zcta_level.df$GEOID)
+  
+  zcta_level.df = zcta_level.df %>%
+    mutate(color = pal_fun(as.numeric(predictor.zip)))
+
+  colors.legend <- zcta_level.df %>%
+    arrange(predictor.zip) %>%
+    distinct(predictor.zip,color)
+   
+
+  HIV_geomap = zcta_level.df %>%
+    #added this line of code to prevent the following error:
+    # Warning message:
+    # sf layer has inconsistent datum (+proj=longlat +datum=NAD83 +no_defs).
+  # Need '+proj=longlat +datum=WGS84'
+    # https://community.rstudio.com/t/how-to-map-tidycensus-list-output/13547/4
+    sf::st_transform(4326) %>%
+    leaflet() %>%
+    addPolygons(
+      stroke = T, weight = 1,opacity = 0.5, color = 'white',
+      fillColor = ~color,
+      fillOpacity = 0.8, smoothFactor = 0.5,
+      popup = p_popup) %>%
+    addTiles()  %>%
+    addLegend("bottomright",
+              # colors = brewer.pal(break_num, "YlOrRd"),
+              colors = colors.legend %>% filter(!is.na(predictor.zip)) %>% pull(color),
+              labels = c(paste0('Low ',legend.name), paste0('High ',legend.name)), 
+              title =  title_a) %>%
+    addCircleMarkers(zcta_level.df$lng, zcta_level.df$lat, radius=zcta_level.df$n_tot/20,
+                     color = "blue",
+                     stroke = F, fillOpacity = 0.5)
+
+   return(list(HIV_geomap = HIV_geomap,
+              zcta_level.df = zcta_level.df))
+
+}
+
+zip.poverty.map <- geo_map.zipvar(county.df = county.df,
+                                  county_zip_list = county_zip_list,
+                                  zip_var = 'predictor_zc_per_poverty_cur_binary',
+                                  'cur_zip_cd',
+                                  title_a = 'High vs low poverty',
+                                  legend.name = 'poverty',
+                                  min.n.obs = 10)
+zip.poverty.map$HIV_geomap
+###plot high vs low outcomes
+# outcome <- map_outcome_list[[2]]
+# title_a = outcome$outcome_var_list_nice
+title_a = 'High vs low proportion in-care'
+county.df = county.df
+county_zip_list = county_zip_list
+outcome_var = 'outcome_care'
+geo_zip_var = 'cur_zip_cd'
+min.n.obs = 10
+legend.name = 'in-care'
+
+geo_map.highlow <- function(county.df,
+                    county_zip_list,
+                    outcome_var,
+                    geo_zip_var,
+                    title_a,
+                    legend.name = 'poverty',
+                    min.n.obs = 10) {
+
+  zcta_data <- get_acs(
+    geography = "zcta",
+    variables = "B19013_001",
+    zcta = county_zip_list,
+    geometry = TRUE
+  )
+
+  
+  #for outcomes such as in-care/supp/late stage dx
+  county_summary.df = county.df %>%
+    group_by(!! rlang::sym(geo_zip_var)) %>%
+    summarize(n_tot = n(),
+              n_outcome = sum(!! rlang::sym(outcome_var))) %>%
+    ungroup() %>%
+    filter(n_tot > min.n.obs) %>%
+    mutate(per_outcome = n_outcome/n_tot) %>%
+    mutate(rsd_zip_cd_cat = as.character(!! rlang::sym(geo_zip_var)),
+           median.outcome = median(per_outcome),
+           highlow.outcome = as.numeric(per_outcome > median.outcome))
+
+
+  zcta_level.df = left_join(zcta_data,
+                            county_summary.df,
+                            by = c("GEOID" = "rsd_zip_cd_cat"))
+
+  zcta_level.df = left_join(zcta_level.df,
+                            zip_code_db %>% select(zipcode, lat, lng),
+                            by = c("GEOID" = "zipcode")) %>%
+    filter(!is.na(lat))
+
+  # zcta_level.df.filt <- zcta_level.df %>%
+  #   mutate()
+
+  # "#808080" NA color (grey)
+
+
+  break_num = 2
+  pal_fun <- colorFactor("YlOrRd", NULL) #, na.color = "#808080"
+  p_popup <- paste0("<strong>", title_a, ": </strong>", zcta_level.df$highlow.outcome, "<br>",
+                    "<strong>Zip code: </strong>", zcta_level.df$GEOID)
+  # p_popup <- paste0("<strong>", title_a, ": </strong>", zcta_level.df$per_outcome, "<br>",
+  #                   "<strong>Zip code: </strong>", zcta_level.df$GEOID)
+  
+  zcta_level.df = zcta_level.df %>%
+    mutate(color = pal_fun(as.numeric(highlow.outcome)))
+
+  colors.legend <- zcta_level.df %>%
+    arrange(highlow.outcome) %>%
+    distinct(highlow.outcome,color)
+   
+  HIV_geomap = zcta_level.df %>%
+    #added this line of code to prevent the following error:
+    # Warning message:
+    # sf layer has inconsistent datum (+proj=longlat +datum=NAD83 +no_defs).
+  # Need '+proj=longlat +datum=WGS84'
+    # https://community.rstudio.com/t/how-to-map-tidycensus-list-output/13547/4
+    sf::st_transform(4326) %>%
+    leaflet() %>%
+    addPolygons(
+      stroke = T, weight = 1,opacity = 0.5, color = 'white',
+      fillColor = ~color,
+      fillOpacity = 0.8, smoothFactor = 0.5,
+      popup = p_popup) %>%
+    addTiles()  %>%
+    addLegend("bottomright",
+              # colors = brewer.pal(break_num, "YlOrRd"),
+              colors = colors.legend %>% filter(!is.na(highlow.outcome)) %>% pull(color),
+              labels = c(paste0('Low ',legend.name), paste0('High ',legend.name)), 
+              title =  title_a) %>%
+    addCircleMarkers(zcta_level.df$lng, zcta_level.df$lat, radius=zcta_level.df$n_tot/20,
+                     color = "blue",
+                     stroke = FALSE, fillOpacity = 0.5)
+
+  return(list(HIV_geomap = HIV_geomap,
+              zcta_level.df = zcta_level.df))
+
+}
+
+title_a = 'High vs low proportion in-care'
+county.df = county.df
+county_zip_list = county_zip_list
+outcome_var = 'outcome_care'
+geo_zip_var = 'cur_zip_cd'
+min.n.obs = 10
+legend.name = 'in-care'
+
+care.highlow.map <- geo_map.highlow(county.df = county.df,
+                                    county_zip_list = county_zip_list,
+                                    outcome_var = 'outcome_care',
+                                    geo_zip_var = 'cur_zip_cd',
+                                    title_a = 'High vs low proportion in-care',
+                                    legend.name = 'in-care',
+                                    min.n.obs = 10) 
+
+supp.highlow.map <- geo_map.highlow(county.df = county.df,
+                                    county_zip_list = county_zip_list,
+                                    outcome_var = 'outcome_vl_supp',
+                                    geo_zip_var = 'cur_zip_cd',
+                                    title_a = 'High vs low proportion viral suppression',
+                                    legend.name = 'rates of viral suppression',
+                                    min.n.obs = 10) 
+supp.highlow.map$HIV_geomap
+
+
+
+outcome1 = zip.poverty.map
+outcome2 = care.highlow.map
+intx.recodings = c("Low poverty, low in-care" = "00",
+             "Low poverty, high in-care" = "01",
+             "High poverty, low in-care" = "10",
+             "High poverty, High in-care" = "11")
+title_a = 'Poverty and in-care interaction'
+geo_map.intx <- function(outcome1,
+                    outcome2,
+                    intx.recodings,
+                    title_a) {
+  
+  intx.df <- left_join(outcome1$zcta_level.df,outcome2$zcta_level.df %>% select(GEOID,highlow.outcome) %>% st_drop_geometry %>% as.data.frame(), by = 'GEOID')
+
+  intx.df.fmt <- intx.df %>%
+  mutate(zip.outcome.intx = paste0(predictor.zip,highlow.outcome) %>% factor(levels = c('00','01','10','11')) %>%
+  fct_recode(!!!intx.recodings))
+  
+   break_num = 2
+  pal_fun <- colorFactor("YlOrRd", NULL) #, na.color = "#808080"
+  p_popup <- paste0("<strong>", title_a, ": </strong>", intx.df.fmt$zip.outcome.intx, "<br>",
+                    "<strong>Zip code: </strong>", intx.df.fmt$GEOID)
+  # p_popup <- paste0("<strong>", title_a, ": </strong>", zcta_level.df$per_outcome, "<br>",
+  #                   "<strong>Zip code: </strong>", zcta_level.df$GEOID)
+  
+  intx.df.fmt = intx.df.fmt %>%
+    mutate(color = pal_fun(as.numeric(zip.outcome.intx)))
+
+  colors.legend <- intx.df.fmt %>%
+    arrange(zip.outcome.intx) %>%
+    distinct(zip.outcome.intx,color)
+  
+  HIV_geomap = intx.df.fmt %>%
+    #added this line of code to prevent the following error:
+    # Warning message:
+    # sf layer has inconsistent datum (+proj=longlat +datum=NAD83 +no_defs).
+  # Need '+proj=longlat +datum=WGS84'
+    # https://community.rstudio.com/t/how-to-map-tidycensus-list-output/13547/4
+    sf::st_transform(4326) %>%
+    leaflet() %>%
+    addPolygons(
+      stroke = T, weight = 1,opacity = 0.5, color = 'white',
+      fillColor = ~color,
+      fillOpacity = 0.8, smoothFactor = 0.5,
+      popup = p_popup) %>%
+    addTiles()  %>%
+    addLegend("bottomright",
+              # colors = brewer.pal(break_num, "YlOrRd"),
+              colors = colors.legend %>% filter(!is.na(zip.outcome.intx)) %>% pull(color),
+              labels = intx.recodings %>% names() , #%>% str_replace_all('IN-CARE', 'IN-CARE<br>') %>% str_replace_all(',', '<br>')
+              title =  title_a) %>%
+    addCircleMarkers(intx.df.fmt$lng, intx.df.fmt$lat, radius=intx.df.fmt$n_tot/20,
+                     color = "blue",
+                     stroke = FALSE, fillOpacity = 0.5)
+return(HIV_geomap)
+
+}
+
+
+poverty.care.map <- geo_map.intx(outcome1 = zip.poverty.map,
+                                 outcome2 = care.highlow.map,
+                                 intx.recodings = c("Low poverty, low in-care" = "00",
+                                                    "Low poverty, high in-care" = "01",
+                                                    "High poverty, low in-care" = "10",
+                                                    "High poverty, High in-care" = "11"),
+                                 title_a = 'Poverty and in-care interaction')
+poverty.care.map
+poverty.supp.map <- geo_map.intx(outcome1 = zip.poverty.map,
+                                 outcome2 = supp.highlow.map,
+                                 intx.recodings = c("Low poverty, low suppression" = "00",
+                                                    "Low poverty, high suppression" = "01",
+                                                    "High poverty, low suppression" = "10",
+                                                    "High poverty, High suppression" = "11"),
+                                 title_a = 'Poverty and viral suppression interaction')
+poverty.supp.map
+mapshot(poverty.supp.map, file = paste0(result_file_loc, 'poverty_supp_',"_map.png", sep = ""))
 ################
 ## Geographic maps
 ################
