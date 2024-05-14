@@ -472,6 +472,7 @@ county.df <- county.df %>%
   mutate(across(.cols = c(matches('predictor_zc|percent_clustered|zc_income')), .fns = function(x){
                             med.x = median(x, na.rm = TRUE)
                             binary = as.numeric(x > med.x)
+                            # binary = as.numeric(x >= med.x)
                             # return(binary)
                             return(data.frame(binary = binary,med.x = med.x))
                           },.unpack = T))
@@ -895,7 +896,11 @@ regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
 
   desc_res.df = var_list$data %>%
     select(all_of(var_list$predictors), !! outcome_var_i) %>%
-    tbl_summary(by = !! outcome_var_i) %>% as_tibble() %>%
+    tbl_summary(by = !! outcome_var_i,
+                digits = all_continuous() ~ 1,  # display 1 decimal for continuous variables
+                 statistic = list(#all_continuous() ~ "{mean} ({sd})",        # stats and format for continuous columns
+                     all_continuous() ~ "{mean} ({p0}, {p100}))",        # stats and format for continuous columns
+                     all_categorical() ~ "{n} / {N} ({p}%)")) %>% as_tibble() %>%
     rename(variable = `**Characteristic**`)
 
   print('univariate')
@@ -943,8 +948,9 @@ regression.output.list <- lapply(X = outcome_var_list,FUN = function(var_list){
               outcome_res.df = outcome_res.df,
               outcome_res.df.round = outcome_res.df.round))
 })
+
 # save(regression.output.list,file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
-load(file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
+# load(file = paste0(result_file_loc, "regression.output.list.RData", sep = ""))
 # 
 # regression.output.list$supp$reg_res.df
 # regression.output.list$care$reg_res.df
@@ -964,9 +970,9 @@ tables.paper <- lapply(regression.output.list, function(output){
   return(outcome_res.df.round.paper)
 })
 
-write_csv(tables.paper$diagnosis, paste0(result_file_loc, 'diagnosis', "_all_tbl_paper_rounded.csv", sep = ""))
-write_csv(tables.paper$supp, paste0(result_file_loc, 'supp', "_all_tbl_paper_rounded.csv", sep = ""))
-write_csv(tables.paper$care, paste0(result_file_loc, 'care', "_all_tbl_paper_rounded.csv", sep = ""))
+write_csv(tables.paper$diagnosis, paste0(result_file_loc, 'diagnosis', "_all_tbl_paper_rounded_mean_range.csv", sep = ""))
+write_csv(tables.paper$supp, paste0(result_file_loc, 'supp', "_all_tbl_paper_rounded_mean_range.csv", sep = ""))
+write_csv(tables.paper$care, paste0(result_file_loc, 'care', "_all_tbl_paper_rounded_mean_range.csv", sep = ""))
 
 #combine ORs into a single table with rows as predictors and columns as outcomes.
 View( regression.output.list$diagnosis$outcome_res.df.round)
